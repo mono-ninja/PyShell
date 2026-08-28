@@ -27,12 +27,14 @@ jobs:
       matrix:
         include:
           # macos-latest is Apple silicon; the universal target cross-compiles
-          # the Intel half, so one job covers both macOS architectures — but it
-          # needs BOTH uv sidecars present.
+          # the Intel half, so one job covers both macOS architectures.
+          # `fetch-uv universal-apple-darwin` downloads both slices and lipos
+          # them — Tauri does not merge external binaries itself, it just looks
+          # for `binaries/uv-universal-apple-darwin`.
           - platform: macos-latest
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            uv-triples: aarch64-apple-darwin x86_64-apple-darwin
+            uv-triples: universal-apple-darwin
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             rust-targets: x86_64-pc-windows-msvc
@@ -46,11 +48,11 @@ jobs:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable

@@ -11,9 +11,10 @@
  * "resource path `binaries/uv-<triple>` doesn't exist", long before bundling.
  *
  * Usage:
- *   node scripts/fetch-uv.mjs                       # host target
- *   node scripts/fetch-uv.mjs x86_64-apple-darwin   # explicit target
- *   node scripts/fetch-uv.mjs --force               # re-download
+ *   node scripts/fetch-uv.mjs                            # host target
+ *   node scripts/fetch-uv.mjs x86_64-apple-darwin        # explicit target
+ *   node scripts/fetch-uv.mjs universal-apple-darwin     # both macOS slices, lipo'd
+ *   node scripts/fetch-uv.mjs --force                    # re-download
  */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -59,10 +60,20 @@ if (!triple) {
   process.exit(1);
 }
 
-const isWindows = triple.includes("windows");
-const archiveName = `uv-${triple}.${isWindows ? "zip" : "tar.gz"}`;
+/**
+ * macOS universal is a *synthetic* target: astral-sh publishes no such archive,
+ * and `tauri build --target universal-apple-darwin` does not lipo external
+ * binaries itself — it looks for `binaries/uv-universal-apple-darwin` and fails
+ * the bundle if it is missing. So both arch slices are fetched and merged here.
+ */
+const UNIVERSAL = "universal-apple-darwin";
+const UNIVERSAL_SLICES = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
+
 const baseUrl = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}`;
-const dest = join(binariesDir, `uv-${triple}${isWindows ? ".exe" : ""}`);
+
+/** Path of the sidecar Tauri will look for, for a given target triple. */
+const destFor = (t) => join(binariesDir, `uv-${t}${t.includes("windows") ? ".exe" : ""}`);
+const dest = destFor(triple);
 
 /**
  * uv is MIT OR Apache-2.0, and we ship its binary inside every bundle. Both
@@ -107,47 +118,73 @@ async function fetchLicenses() {
   }
 }
 
-// Licences first, and outside the try below: that block's `finally` cleans a
-// temp dir, and the early `process.exit` for an already-present binary would
-// skip it.
-await fetchLicenses();
-
-if (existsSync(dest) && !force) {
-  console.log(
-    `✓ ${dest} already present (${(statSync(dest).size / 1e6).toFixed(1)} MB) — pass --force to re-download`,
-  );
-  process.exit(0);
-}
-
-const work = mkdtempSync(join(tmpdir(), "pyshell-uv-"));
-try {
-  console.log(`Downloading ${archiveName} (uv ${UV_VERSION})…`);
-  const [archive, checksumFile] = await Promise.all([
-    download(`${baseUrl}/${archiveName}`),
-    download(`${baseUrl}/${archiveName}.sha256`),
-  ]);
-
-  const expected = checksumFile.toString("utf8").trim().split(/\s+/)[0];
-  const actual = createHash("sha256").update(archive).digest("hex");
-  if (expected !== actual) {
-    throw new Error(
-      `checksum mismatch for ${archiveName}\n  expected ${expected}\n  got      ${actual}`,
+/** Download, verify and install the sidecar for one real target triple. */
+async function fetchSidecar(target) {
+  const out = destFor(target);
+  if (existsSync(out) && !force) {
+    console.log(
+      `✓ ${out} already present (${(statSync(out).size / 1e6).toFixed(1)} MB) — pass --force to re-download`,
     );
+    return out;
   }
 
-  const archivePath = join(work, archiveName);
-  writeFileSync(archivePath, archive);
-  // bsdtar handles both .tar.gz and .zip, and ships with macOS and Windows 10+.
-  execFileSync("tar", ["-xf", archivePath, "-C", work], { stdio: "inherit" });
+  const win = target.includes("windows");
+  const archiveName = `uv-${target}.${win ? "zip" : "tar.gz"}`;
+  const work = mkdtempSync(join(tmpdir(), "pyshell-uv-"));
+  try {
+    console.log(`Downloading ${archiveName} (uv ${UV_VERSION})…`);
+    const [archive, checksumFile] = await Promise.all([
+      download(`${baseUrl}/${archiveName}`),
+      download(`${baseUrl}/${archiveName}.sha256`),
+    ]);
 
-  const extracted = findBinary(work, isWindows ? "uv.exe" : "uv");
-  if (!extracted) throw new Error(`no uv binary inside ${archiveName}`);
+    const expected = checksumFile.toString("utf8").trim().split(/\s+/)[0];
+    const actual = createHash("sha256").update(archive).digest("hex");
+    if (expected !== actual) {
+      throw new Error(
+        `checksum mismatch for ${archiveName}\n  expected ${expected}\n  got      ${actual}`,
+      );
+    }
 
-  mkdirSync(binariesDir, { recursive: true });
-  copyFileSync(extracted, dest);
-  if (!isWindows) chmodSync(dest, 0o755);
+    writeFileSync(join(work, archiveName), archive);
+    // bsdtar handles both .tar.gz and .zip, and ships with macOS and Windows 10+.
+    //
+    // Extract from *inside* the work directory, passing only the basename:
+    // under Git Bash on Windows `tar` is GNU tar, which reads an argument
+    // containing a colon with no preceding slash as `host:path` — so an
+    // absolute `C:\…\uv.zip` is taken for a remote archive and fails with
+    // "Cannot connect to C: resolve failed". A bare filename has no colon, and
+    // the same call is correct for bsdtar on macOS.
+    execFileSync("tar", ["-xf", archiveName], { cwd: work, stdio: "inherit" });
 
-  console.log(`✓ ${dest} (${(statSync(dest).size / 1e6).toFixed(1)} MB, sha256 verified)`);
-} finally {
-  rmSync(work, { recursive: true, force: true });
+    const extracted = findBinary(work, win ? "uv.exe" : "uv");
+    if (!extracted) throw new Error(`no uv binary inside ${archiveName}`);
+
+    mkdirSync(binariesDir, { recursive: true });
+    copyFileSync(extracted, out);
+    if (!win) chmodSync(out, 0o755);
+
+    console.log(`✓ ${out} (${(statSync(out).size / 1e6).toFixed(1)} MB, sha256 verified)`);
+    return out;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+// Licences first: they ship beside whichever slice we end up with, and the
+// early return for an already-present binary must not skip them.
+await fetchLicenses();
+
+if (triple === UNIVERSAL) {
+  // `lipo` refuses to merge a file into itself, so build the fat binary from
+  // the two thin ones and leave those in place — they cost nothing and a
+  // per-arch build still works without re-downloading.
+  const slices = [];
+  for (const slice of UNIVERSAL_SLICES) slices.push(await fetchSidecar(slice));
+  execFileSync("lipo", ["-create", "-output", dest, ...slices], { stdio: "inherit" });
+  chmodSync(dest, 0o755);
+  const arches = execFileSync("lipo", ["-archs", dest]).toString().trim();
+  console.log(`✓ ${dest} (${(statSync(dest).size / 1e6).toFixed(1)} MB, ${arches})`);
+} else {
+  await fetchSidecar(triple);
 }
