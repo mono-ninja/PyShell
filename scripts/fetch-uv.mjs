@@ -107,6 +107,49 @@ function findBinary(dir, wanted) {
   return null;
 }
 
+/**
+ * Unpack `archiveName` inside `work`.
+ *
+ * uv ships .tar.gz for Unix and **.zip for Windows**, so the extractor has to
+ * read both. That means bsdtar (libarchive) — and on Windows the bare name
+ * `tar` cannot be trusted to be it: under Git Bash, which is the shell the
+ * release workflow uses, `tar` resolves to GNU tar, which
+ *
+ *   - cannot read a zip at all ("This does not look like a tar archive"), and
+ *   - treats an absolute `C:\…` path as a remote `host:path`
+ *     ("Cannot connect to C: resolve failed").
+ *
+ * System32's `tar.exe` *is* bsdtar (Windows 10 1803+), so address it by full
+ * path rather than through PATH, and pass only the basename with the work
+ * directory as cwd so no drive-letter colon reaches the command line at all.
+ * PowerShell's Expand-Archive is the fallback for a Windows without bsdtar.
+ */
+function extract(archiveName, work) {
+  if (process.platform !== "win32") {
+    // macOS tar is bsdtar and reads both formats, which is also what makes
+    // cross-fetching the Windows zip from a Mac work.
+    execFileSync("tar", ["-xf", archiveName], { cwd: work, stdio: "inherit" });
+    return;
+  }
+
+  const bsdtar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+  if (existsSync(bsdtar)) {
+    execFileSync(bsdtar, ["-xf", archiveName], { cwd: work, stdio: "inherit" });
+    return;
+  }
+
+  execFileSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `Expand-Archive -LiteralPath '${archiveName}' -DestinationPath '.' -Force`,
+    ],
+    { cwd: work, stdio: "inherit" },
+  );
+}
+
 /** Fetch uv's licence texts next to the binary we redistribute. */
 async function fetchLicenses() {
   mkdirSync(licenseDir, { recursive: true });
@@ -147,15 +190,7 @@ async function fetchSidecar(target) {
     }
 
     writeFileSync(join(work, archiveName), archive);
-    // bsdtar handles both .tar.gz and .zip, and ships with macOS and Windows 10+.
-    //
-    // Extract from *inside* the work directory, passing only the basename:
-    // under Git Bash on Windows `tar` is GNU tar, which reads an argument
-    // containing a colon with no preceding slash as `host:path` — so an
-    // absolute `C:\…\uv.zip` is taken for a remote archive and fails with
-    // "Cannot connect to C: resolve failed". A bare filename has no colon, and
-    // the same call is correct for bsdtar on macOS.
-    execFileSync("tar", ["-xf", archiveName], { cwd: work, stdio: "inherit" });
+    extract(archiveName, work);
 
     const extracted = findBinary(work, win ? "uv.exe" : "uv");
     if (!extracted) throw new Error(`no uv binary inside ${archiveName}`);
