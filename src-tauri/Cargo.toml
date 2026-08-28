@@ -1,6 +1,6 @@
 [package]
 name = "pyshell"
-version = "0.1.0"
+version = "0.2.0"
 description = "GUI for running Python scripts with isolated venvs"
 authors = ["Dmytro Lobov"]
 edition = "2021"

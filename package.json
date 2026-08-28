@@ -1,6 +1,6 @@
 {
   "name": "pyshell",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "GUI for running Python scripts with isolated venvs",
   "author": "Dmytro Lobov",
@@ -29,6 +29,7 @@
     "@tauri-apps/plugin-opener": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.1.0",
     "@tauri-apps/plugin-updater": "^2.0.0",
+    "lucide-preact": "^1.35.0",
     "preact": "^10.24.0"
   },
   "devDependencies": {

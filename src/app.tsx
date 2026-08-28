@@ -28,6 +28,7 @@ import { useMenuAction } from "./hooks/useMenuAction";
 import { ScriptingGuide } from "./components/ScriptingGuide";
 import { useEscape } from "./lib/keyboard";
 import { BookIcon, CheckIcon, CloseIcon, PlayIcon, SearchIcon, StopIcon, TrashIcon } from "./components/icons";
+import { ScriptIcon } from "./lib/script-icon";
 import { Settings } from "./components/Settings/Settings";
 
 interface EnvProgress {
@@ -882,7 +883,7 @@ export function App() {
               class="flex shrink-0 items-center gap-3 border-b border-line px-5 pb-3 pt-8"
             >
               <div class="flex min-w-0 flex-1 items-center gap-2.5">
-                <span class="shrink-0 text-[19px] leading-none">{schema.icon ?? "📄"}</span>
+                <ScriptIcon icon={schema.icon} size={19} class="shrink-0" />
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
                     <h1 class="truncate text-[15px] font-semibold leading-tight">{schema.name}</h1>

@@ -3,8 +3,10 @@
  *
  * Emoji glyphs like U+1F5CE (🗎) render inconsistently across platforms and font
  * fallbacks — on macOS the file/folder ones came out as unrelated shapes — so
- * anything structural uses a real vector here. Script icons stay emoji because
- * those come from the manifest and are the author's choice.
+ * anything structural uses a real vector here. A script's own icon is a separate
+ * concern: it comes from the manifest and is the author's choice — see
+ * `src/lib/script-icon.tsx`, which renders that field as either emoji/text or a
+ * curated vector icon (`icon: lucide:<name>`).
  *
  * 16×16 grid, 1.5px stroke, `currentColor`, so an icon takes the colour and size
  * of whatever it sits in.

@@ -3,6 +3,7 @@ import { ipc } from "../../lib/ipc";
 import { useToast } from "../Toast";
 import { ThemeToggle } from "../ThemeToggle";
 import { TrashIcon } from "../icons";
+import { ScriptIcon } from "../../lib/script-icon";
 import type { DiskUsage, ScriptEntry } from "../../types/schema";
 import type { Theme } from "../../hooks/useTheme";
 
@@ -144,7 +145,7 @@ export function Settings({ scripts, theme, onThemeChange }: SettingsProps) {
                         return (
                           <tr key={id} class="row-hover">
                             <td class="border-b border-line/60 px-3 py-2">
-                              <span class="mr-1.5">{meta?.icon ?? "📄"}</span>
+                              <ScriptIcon icon={meta?.icon} size={12} class="mr-1.5" />
                               <span class="text-fg">{meta?.name ?? id}</span>
                             </td>
                             <td class="border-b border-line/60 px-3 py-2 text-right tabular-nums text-muted">

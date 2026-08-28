@@ -53,7 +53,7 @@ schema: 1
 id: com.example.my-script
 name: My Script
 description: What this script does
-icon: 🔧
+icon: lucide:wrench
 category: Tools
 
 runtime:
@@ -90,6 +90,11 @@ outputs:
 | \`id\` | no | Unique id; derived from the path when absent |
 | \`description\`, \`icon\`, \`category\` | no | Presentation |
 | \`outputs\` | no | Artifacts and result kind |
+
+\`icon\` accepts either a bare emoji (\`icon: 🔧\`) or a vector icon by name,
+\`icon: lucide:<name>\` — e.g. \`lucide:rocket\`, \`lucide:database\`,
+\`lucide:terminal\`. An unknown or missing name falls back to plain text, so
+existing emoji manifests keep working unchanged.
 
 **\`runtime\`**
 

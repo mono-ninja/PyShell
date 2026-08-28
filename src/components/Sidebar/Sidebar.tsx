@@ -4,6 +4,7 @@ import { ipc } from "../../lib/ipc";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { ScriptEntry } from "../../types/schema";
 import { ChevronIcon, ClockIcon, CloseIcon, EditorIcon, FolderIcon, GearIcon, RefreshIcon, SearchIcon, SortIcon, StarIcon, TerminalIcon } from "../icons";
+import { ScriptIcon } from "../../lib/script-icon";
 import { ContextMenu } from "../ContextMenu";
 import type { MenuItem } from "../ContextMenu";
 import { useToast } from "../Toast";
@@ -237,7 +238,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             title="Running"
           />
         )}
-        <span class="shrink-0 text-[15px] leading-none">{s.icon ?? "📄"}</span>
+        <ScriptIcon icon={s.icon} size={15} class="shrink-0" />
         <span class="flex-1 truncate">{s.name}</span>
         {/* The number is the shortcut, so it is shown rather than explained.
             Only the first nine get one — pinning a tenth script is allowed. */}
