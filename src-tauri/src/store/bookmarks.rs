@@ -270,6 +270,13 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// macOS only: the `.path` sidecar is written by the macOS bookmark path,
+    /// as the fallback for when `NSURL` bookmark data cannot be produced.
+    /// Elsewhere `save_bookmark` is a no-op and `resolve_bookmark` deliberately
+    /// returns `None` — security-scoped bookmarks are a macOS concept, and the
+    /// script path is already in `scripts.json`. Running this test off macOS
+    /// asserted the macOS contract against the stub and failed on Windows.
+    #[cfg(target_os = "macos")]
     #[test]
     fn resolve_bookmark_reads_path_fallback() {
         let dir = tmp_dir();
@@ -281,6 +288,19 @@ mod tests {
 
         let resolved = store.resolve_bookmark("test");
         assert_eq!(resolved, Some(PathBuf::from("/some/path/to/script.py")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The other half of the same contract: off macOS the stub must keep
+    /// returning `None` even when a `.path` file is sitting right there, so the
+    /// two platforms cannot silently drift into different behaviour.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn resolve_bookmark_is_a_no_op_off_macos() {
+        let dir = tmp_dir();
+        let store = BookmarkStore::new(&dir);
+        std::fs::write(store.bookmarks_dir.join("test.path"), "/some/path/to/script.py").unwrap();
+        assert_eq!(store.resolve_bookmark("test"), None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
