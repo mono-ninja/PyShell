@@ -1,0 +1,132 @@
+name: Release
+
+# Publishing is driven by tags: `git tag v1.0.0 && git push origin v1.0.0`.
+# The release is created as a DRAFT — review the attached .dmg / installers,
+# write the notes, then publish it by hand from the Releases page.
+#
+# Two prerequisites are easy to forget and both fail the build long before
+# bundling:
+#   1. `npm run fetch-uv -- <triple>` for every target — `build.rs` copies the
+#      `externalBin` sidecar, so a missing file fails `cargo check` with
+#      "resource path `binaries/uv-<triple>` doesn't exist".
+#   2. `cargo test` before the frontend build — it is what generates the
+#      gitignored ts-rs bindings in `src/types/bindings/`, and the tauri
+#      `beforeBuildCommand` (`npm run build` → `tsc --noEmit`) fails without
+#      them. Both steps below exist for exactly these reasons; don't drop them.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      # One target failing shouldn't discard the artifacts of the others.
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest is Apple silicon; the universal target cross-compiles
+          # the Intel half, so one job covers both macOS architectures — but it
+          # needs BOTH uv sidecars present.
+          - platform: macos-latest
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            uv-triples: aarch64-apple-darwin x86_64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            uv-triples: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+    env:
+      # A step-level `if:` cannot read the `secrets` context, so hoist the
+      # "is signing configured?" check to the job level where it can.
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      # Sidecar(s) for this target. fetch-uv uses only Node built-ins, so it
+      # runs before any Rust step. `bash` is the shell on the Windows runner
+      # too (Git Bash), so the same loop works everywhere.
+      - name: Fetch uv sidecar(s)
+        shell: bash
+        run: |
+          for t in ${{ matrix.uv-triples }}; do
+            npm run fetch-uv -- "$t"
+          done
+
+      # Generates the ts-rs bindings AND validates the backend before we spend
+      # time bundling. The unix-only process tests are `#[cfg(all(test, unix))]`
+      # and simply don't compile into the Windows run.
+      - name: Generate bindings + run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # `github.ref_name` is the tag on a tag push, but the BRANCH name on a
+      # manual run — passing it through unguarded would publish a release
+      # tagged "main". tauri-action only creates a release when tagName is
+      # non-empty, so a manual run builds the app as a smoke test and
+      # publishes nothing.
+      #
+      # Code signing / notarization, and ONLY when a certificate is actually
+      # configured and we're on macOS. An unset secret renders as an empty
+      # string, but listing it under `env:` still DEFINES the variable — and
+      # tauri's bundler checks only that APPLE_CERTIFICATE is present, so an
+      # empty value made it try to import an empty certificate and killed the
+      # build with:
+      #   failed codesign application: failed to import keychain certificate
+      # Exporting through $GITHUB_ENV leaves the variables genuinely absent
+      # when there is no certificate, which is what an unsigned build needs.
+      - name: Enable Apple code signing
+        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                     APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            printf '%s<<__GHENV__\n%s\n__GHENV__\n' "$var" "${!var}" >> "$GITHUB_ENV"
+          done
+
+      # Both matrix jobs point at the same tagName, so tauri-action creates the
+      # release once and uploads each platform's assets to it.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && 'PyShell __VERSION__' || '' }}
+          releaseBody: |
+            See the assets below to download and install this version.
+
+            **macOS will refuse to open this build if it is not notarized.**
+            Open *System Settings → Privacy & Security* and click *Open Anyway*,
+            or run:
+
+            ```
+            xattr -dr com.apple.quarantine /Applications/PyShell.app
+            ```
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}

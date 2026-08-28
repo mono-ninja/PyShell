@@ -1,0 +1,282 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Theme tokens.
+
+   Light is the bare :root, dark is `.dark` on <html> — set by useTheme, which
+   resolves "system" itself. There is deliberately no prefers-color-scheme block:
+   a media query can't be overridden by an explicit choice, so having both would
+   let the two disagree.
+   --------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  --bg: 255 255 255;
+  --surface: 250 250 251;
+  --raised: 255 255 255;
+  --sidebar-bg: 243 243 245;
+  --line: 224 224 229;
+  --fg: 24 24 27;
+  --fg-muted: 90 90 100;
+  --fg-subtle: 143 143 155;
+  --accent: 0 113 235;
+  --ok: 22 145 82;
+  --warn: 190 116 0;
+  --danger: 209 46 46;
+
+  --shade: 0 0 0;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: 25 25 28;
+  --surface: 32 32 36;
+  --raised: 39 39 44;
+  --sidebar-bg: 20 20 23;
+  --line: 56 56 63;
+  --fg: 240 240 243;
+  --fg-muted: 165 165 176;
+  --fg-subtle: 120 120 132;
+  --accent: 42 141 255;
+  --ok: 55 190 110;
+  --warn: 226 158 44;
+  --danger: 240 105 105;
+
+  --shade: 255 255 255;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The window is opaque (`transparent: false` in tauri.conf.json), so the macOS
+   vibrancy call in lib.rs has nothing to blend with — this class simply carries
+   the sidebar colour, which also keeps the chosen theme correct when it
+   disagrees with the OS appearance. */
+.vibrancy {
+  background: rgb(var(--sidebar-bg));
+  color: rgb(var(--fg));
+}
+
+/* --- Form controls ------------------------------------------------------- */
+
+@layer components {
+  .form-input {
+    @apply w-full rounded-md border border-line bg-raised px-2.5 py-1.5 text-[13px] text-fg
+           placeholder:text-subtle transition-colors;
+    outline: none;
+  }
+  .form-input:hover:not(:focus):not(:disabled) {
+    border-color: rgb(var(--shade) / 0.22);
+  }
+  .form-input:focus,
+  .form-input:focus-visible {
+    border-color: rgb(var(--accent));
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
+  }
+  .form-input:disabled {
+    @apply cursor-not-allowed opacity-55;
+  }
+  .form-input.is-invalid {
+    border-color: rgb(var(--danger));
+  }
+  .form-input.is-invalid:focus {
+    box-shadow: 0 0 0 3px rgb(var(--danger) / 0.18);
+  }
+
+  textarea.form-input {
+    @apply resize-y leading-relaxed;
+  }
+
+  select.form-input {
+    @apply cursor-pointer appearance-none pr-7;
+    background-image: linear-gradient(45deg, transparent 50%, rgb(var(--fg-muted)) 50%),
+      linear-gradient(135deg, rgb(var(--fg-muted)) 50%, transparent 50%);
+    background-position: right 13px center, right 8px center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  /* Picker buttons (file/dir/save path) read as fields but act as buttons. */
+  .form-picker {
+    @apply flex w-full items-center gap-2 rounded-md border border-line bg-raised px-2.5 py-1.5
+           text-left text-[13px] transition-colors;
+  }
+  .form-picker:hover {
+    border-color: rgb(var(--shade) / 0.22);
+    background: rgb(var(--shade) / 0.02);
+  }
+  .form-picker.is-empty {
+    @apply text-subtle;
+  }
+  .form-picker.is-drop-target {
+    border-color: rgb(var(--accent));
+    background: rgb(var(--accent) / 0.08);
+  }
+
+  .field-label {
+    @apply text-[12px] font-medium text-muted;
+  }
+  .field-help {
+    @apply text-2xs leading-snug text-subtle;
+  }
+  .field-error {
+    @apply text-2xs font-medium;
+    color: rgb(var(--danger));
+  }
+
+  /* --- Buttons ---------------------------------------------------------- */
+
+  .btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5
+           text-[12px] font-medium transition-colors;
+    outline: none;
+  }
+  .btn:focus-visible {
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.35);
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-45;
+  }
+
+  .btn-primary {
+    @apply text-white;
+    background: rgb(var(--accent));
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: rgb(var(--accent) / 0.86);
+  }
+
+  .btn-run {
+    @apply px-3.5 text-white;
+    background: rgb(var(--ok));
+  }
+  .btn-run:hover:not(:disabled) {
+    background: rgb(var(--ok) / 0.86);
+  }
+
+  .btn-danger {
+    @apply px-3.5 text-white;
+    background: rgb(var(--danger));
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgb(var(--danger) / 0.86);
+  }
+
+  .btn-warn {
+    @apply text-white;
+    background: rgb(var(--warn));
+  }
+  .btn-warn:hover:not(:disabled) {
+    background: rgb(var(--warn) / 0.86);
+  }
+
+  /* Default: quiet, bordered. */
+  .btn-secondary {
+    @apply border border-line bg-raised text-fg;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: rgb(var(--shade) / 0.05);
+  }
+
+  .btn-ghost {
+    @apply text-muted;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgb(var(--shade) / 0.07);
+    color: rgb(var(--fg));
+  }
+
+  /* --- Misc ------------------------------------------------------------- */
+
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium;
+  }
+
+  .panel-title {
+    @apply text-2xs font-semibold uppercase tracking-wider text-subtle;
+  }
+
+  .row-hover:hover {
+    background: rgb(var(--shade) / 0.04);
+  }
+}
+
+/* Native checkboxes, tinted to the theme accent — cheaper and more accessible
+   than a custom control, and they inherit the platform's focus ring. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: rgb(var(--accent));
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* --- Log view ------------------------------------------------------------ */
+
+.log-line {
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "SF Mono", "JetBrains Mono", "Fira Code", "Menlo", monospace;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.log-stderr {
+  color: rgb(var(--danger));
+}
+
+.log-stdout {
+  color: rgb(var(--fg-muted));
+}
+
+/* Wrap mode: break long lines instead of clipping them. The fixed-height
+   virtualization switches to per-line estimated heights when this is on. */
+.log-line-wrap {
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* --- Scrollbars ---------------------------------------------------------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--shade) / 0.2);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--shade) / 0.32);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

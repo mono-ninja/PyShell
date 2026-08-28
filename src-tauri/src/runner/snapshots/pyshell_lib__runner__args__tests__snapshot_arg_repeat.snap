@@ -1,0 +1,10 @@
+---
+source: src/runner/args.rs
+expression: argv
+---
+[
+    "--tag",
+    "a",
+    "--tag",
+    "b",
+]

@@ -1,0 +1,8 @@
+---
+source: src/runner/args.rs
+expression: argv
+---
+[
+    "--name",
+    "hello world",
+]

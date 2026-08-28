@@ -1,0 +1,7 @@
+---
+source: src/runner/args.rs
+expression: inputs.env
+---
+{
+    "API_KEY": "secret123",
+}

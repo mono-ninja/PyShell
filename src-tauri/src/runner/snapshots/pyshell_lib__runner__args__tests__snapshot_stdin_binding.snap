@@ -1,0 +1,7 @@
+---
+source: src/runner/args.rs
+expression: inputs.stdin
+---
+Some(
+    "line1\nline2\nline3",
+)
