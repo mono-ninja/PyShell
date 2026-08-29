@@ -13,20 +13,28 @@ pub fn uv_binary_path(app: &AppHandle) -> Result<PathBuf> {
     // Tauri external binaries are resolved with a target-triple suffix
     let target_triple = get_target_triple();
 
-    // Try resource dir first (production)
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| AppError::Env(format!("cannot find exe: {}", e)))?
+        .parent()
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+
+    // Production: Tauri strips the target-triple suffix and bundles
+    // `externalBin` binaries next to the main executable (e.g.
+    // `Contents/MacOS/uv` in a macOS .app), not into the resource dir.
+    let sidecar_name = if cfg!(windows) { "uv.exe" } else { "uv" };
+    let bundled_candidate = exe_dir.join(sidecar_name);
+    if bundled_candidate.exists() {
+        return Ok(bundled_candidate);
+    }
+
+    // Also try resource dir, in case of a different bundling layout.
     if let Ok(resource_dir) = app.path().resource_dir() {
         let candidate = resource_dir.join(format!("uv-{}", target_triple));
         if candidate.exists() {
             return Ok(candidate);
         }
     }
-
-    // Fallback: dev mode — look relative to the executable
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| AppError::Env(format!("cannot find exe: {}", e)))?
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf();
 
     // In dev, the binary is in src-tauri/binaries/
     let dev_candidate = exe_dir.join("binaries").join(format!("uv-{}", target_triple));
