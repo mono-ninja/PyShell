@@ -109,6 +109,7 @@ mod tests {
             name: format!("Script {}", id),
             icon: None,
             category: None,
+            needs: Vec::new(),
             path: PathBuf::from("/tmp/test.py"),
             source: SchemaSource::Yaml,
             reachable: true,

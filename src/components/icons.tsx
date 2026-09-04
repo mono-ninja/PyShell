@@ -239,6 +239,40 @@ export function RefreshIcon(props: IconProps) {
   );
 }
 
+/** Storefront awning — the Script Store button. */
+export function StoreIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M2.25 6.25 3.5 2.75h9l1.25 3.5" />
+      <path d="M2.25 6.25a2 2 0 0 0 3.75 1 2 2 0 0 0 4 0 2 2 0 0 0 3.75 1" />
+      <path d="M3.25 8.5v4.75h9.5V8.5" />
+      <path d="M6.5 13.25v-3h3v3" />
+    </Svg>
+  );
+}
+
+/** Down arrow into a tray — download / install. */
+export function DownloadIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M8 2.5v7.5" />
+      <path d="M4.75 7 8 10.25 11.25 7" />
+      <path d="M2.75 13.25h10.5" />
+    </Svg>
+  );
+}
+
+/** Chain links — a script that depends on other scripts (`needs`). */
+export function LinkIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6.5 9.5 9.5 6.5" />
+      <path d="M5.25 7.25 3.9 8.6a2.3 2.3 0 0 0 3.25 3.25l1.35-1.35" />
+      <path d="M10.75 8.75 12.1 7.4a2.3 2.3 0 0 0-3.25-3.25L7.5 5.5" />
+    </Svg>
+  );
+}
+
 /**
  * Pin marker for Favorites. `filled` is the pinned state — outline alone reads
  * as "not pinned yet" on a hover-revealed button, which is what the sidebar

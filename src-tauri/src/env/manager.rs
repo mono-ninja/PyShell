@@ -272,6 +272,7 @@ mod tests {
             description: None,
             icon: None,
             category: None,
+            needs: Vec::new(),
             runtime: Runtime {
                 entry: PathBuf::from("main.py"),
                 python: python.to_string(),
@@ -295,6 +296,7 @@ mod tests {
             name: id.to_string(),
             icon: None,
             category: None,
+            needs: Vec::new(),
             path: PathBuf::from("/tmp/main.py"),
             source: SchemaSource::Yaml,
             reachable: true,
@@ -371,6 +373,7 @@ mod tests {
             name: "noschema".into(),
             icon: None,
             category: None,
+            needs: Vec::new(),
             path: PathBuf::from("/tmp/main.py"),
             source: SchemaSource::Yaml,
             reachable: true,

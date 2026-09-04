@@ -1,6 +1,6 @@
 [package]
 name = "pyshell"
-version = "0.2.1"
+version = "0.3.0"
 description = "GUI for running Python scripts with isolated venvs"
 authors = ["Dmytro Lobov"]
 edition = "2021"
@@ -43,6 +43,10 @@ dirs = "5"
 toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 notify = "7"
+# Same version and TLS stack the updater plugin already compiles in, so this
+# adds no second copy of reqwest to the build. Used only by `repo.rs` (the
+# Script Store); rustls avoids an OpenSSL dependency on every target.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy = "0.6"

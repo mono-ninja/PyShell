@@ -121,6 +121,44 @@ pub fn build_process_inputs(
     }
 }
 
+/// Resolve a script's `needs` ids to the installed scripts' folders:
+/// id → absolute path of the dependency's project folder (the parent of its
+/// entry file). Needs that are not imported resolve to nothing — the header
+/// pill has already warned about them, and a half-wired path in the env would
+/// be worse than an absent key the script can check for.
+pub fn resolve_deps(
+    needs: &[String],
+    scripts: &[crate::manifest::model::ScriptEntry],
+) -> HashMap<String, String> {
+    needs
+        .iter()
+        .filter_map(|id| {
+            scripts
+                .iter()
+                .find(|s| &s.id == id)
+                .and_then(|s| s.path.parent())
+                .map(|p| (id.clone(), p.to_string_lossy().into_owned()))
+        })
+        .collect()
+}
+
+/// The `PYSHELL_DEPS` env var handed to a script that declared `needs`:
+/// a JSON object `{ "com.pyshell.sitecrawler": "/abs/folder" }` — one key per
+/// *installed* dependency. `None` when there is nothing to pass, so the env of
+/// the overwhelming majority of scripts is unchanged.
+///
+/// JSON rather than a bespoke `id=path id=path` format because the script
+/// side is a one-liner either way (`json.loads`) and JSON needs no escaping
+/// rules of its own. Paths are not secrets — env, not argv, is only the rule
+/// for secret *values*.
+pub fn deps_env(deps: &HashMap<String, String>) -> Option<(String, String)> {
+    if deps.is_empty() {
+        return None;
+    }
+    let value = serde_json::to_string(deps).expect("a map of strings always serializes");
+    Some(("PYSHELL_DEPS".to_string(), value))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn append_arg(
     input_type: &InputType,
@@ -257,6 +295,7 @@ mod tests {
             description: None,
             icon: None,
             category: None,
+            needs: Vec::new(),
             runtime: Runtime {
                 entry: PathBuf::from("test.py"),
                 python: ">=3.11".to_string(),
@@ -793,5 +832,52 @@ mod tests {
         let out = build_process_inputs(&schema, &values, &secrets);
         assert_eq!(out.env.get("TOKEN").map(String::as_str), Some("s3cret"));
         assert!(out.argv.is_empty(), "got {:?}", out.argv);
+    }
+
+    // --- Script dependencies (PYSHELL_DEPS) ---------------------------------
+
+    fn script_at(id: &str, path: &str) -> crate::manifest::model::ScriptEntry {
+        crate::manifest::model::ScriptEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            icon: None,
+            category: None,
+            needs: Vec::new(),
+            path: PathBuf::from(path),
+            source: SchemaSource::Yaml,
+            reachable: true,
+            schema_error: None,
+        }
+    }
+
+    #[test]
+    fn resolve_deps_maps_installed_needs_to_their_folders() {
+        let needs = vec!["com.pyshell.sitecrawler".to_string(), "local.gone".to_string()];
+        let scripts = vec![
+            script_at("com.pyshell.sitecrawler", "/tools/site-crawler/main.py"),
+            script_at("com.pyshell.other", "/tools/other/main.py"),
+        ];
+        let deps = resolve_deps(&needs, &scripts);
+        // The installed need resolves to its folder; the missing one is
+        // simply absent rather than pointing somewhere stale.
+        assert_eq!(
+            deps.get("com.pyshell.sitecrawler").map(String::as_str),
+            Some("/tools/site-crawler")
+        );
+        assert!(!deps.contains_key("local.gone"));
+    }
+
+    #[test]
+    fn deps_env_is_none_without_dependencies_and_json_when_present() {
+        assert!(deps_env(&HashMap::new()).is_none(), "no needs → no env var");
+
+        let deps: HashMap<String, String> =
+            [("com.pyshell.sitecrawler".to_string(), "/tools/site-crawler".to_string())]
+                .into_iter()
+                .collect();
+        let (name, value) = deps_env(&deps).unwrap();
+        assert_eq!(name, "PYSHELL_DEPS");
+        // Pinned shape: one flat JSON object, id → folder.
+        assert_eq!(value, r#"{"com.pyshell.sitecrawler":"/tools/site-crawler"}"#);
     }
 }

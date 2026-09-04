@@ -61,6 +61,9 @@ pub fn build<R: Runtime, M: Manager<R>>(app: &M, favorites: &[Favorite]) -> taur
         true,
         Some("CmdOrCtrl+Shift+O"),
     )?;
+    // No accelerator on purpose: the store is a browse-and-pick dialog, not a
+    // frequent verb like the two imports above it.
+    let store = MenuItem::with_id(app, "store:open", "Add from Store…", true, None::<&str>)?;
 
     // --- App / File -------------------------------------------------------
     //
@@ -107,6 +110,7 @@ pub fn build<R: Runtime, M: Manager<R>>(app: &M, favorites: &[Favorite]) -> taur
         &[
             &import_file,
             &import_folder,
+            &store,
             &PredefinedMenuItem::separator(app)?,
             &settings,
             &show_logs,
@@ -118,7 +122,12 @@ pub fn build<R: Runtime, M: Manager<R>>(app: &M, favorites: &[Favorite]) -> taur
 
     // --- File (macOS only; folded into the menu above elsewhere) ----------
     #[cfg(target_os = "macos")]
-    let file_menu = Submenu::with_items(app, "File", true, &[&import_file, &import_folder])?;
+    let file_menu = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[&import_file, &import_folder, &store],
+    )?;
 
     // --- Edit -------------------------------------------------------------
     //

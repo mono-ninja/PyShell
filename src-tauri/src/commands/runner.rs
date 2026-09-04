@@ -31,6 +31,12 @@ pub async fn run_script(
     // Load secrets from Keychain — fail if a required secret can't be loaded (audit M3)
     let secrets = load_secrets(&state, &script_id)?;
 
+    // Resolve declared script dependencies (id → folder) for PYSHELL_DEPS.
+    // Only installed ones resolve; the header pill has warned about the rest.
+    let scripts = state.scripts.lock().unwrap().clone();
+    let deps = runner::args::resolve_deps(&schema.needs, &scripts);
+    drop(scripts);
+
     // Start security-scoped resource access (Plan.md §M6)
     // Access is maintained for the lifetime of the spawned task
     let bookmark_store = std::sync::Arc::new(crate::store::bookmarks::BookmarkStore::new(&state.app_support_dir));
@@ -42,6 +48,7 @@ pub async fn run_script(
         &schema,
         values,
         secrets,
+        deps,
         python,
         on_event,
         &state.jobs,

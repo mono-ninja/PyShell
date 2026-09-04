@@ -8,18 +8,22 @@ use tauri::ipc::Channel;
 use tokio::process::Command;
 
 use crate::manifest::model::{ExitReason, JobEvent, JobId, ScriptSchema};
-use crate::runner::args::build_process_inputs;
+use crate::runner::args::{build_process_inputs, deps_env};
 use crate::runner::group;
 use crate::runner::stream::{stream_output, JobEventSender};
 use crate::runner::registry::JobRegistry;
 
 /// Spawn a script as a child process, streaming output via a Tauri Channel.
 ///
+/// `deps` is the resolved `needs` map (id → folder) for scripts that declared
+/// dependencies; it reaches the child as `PYSHELL_DEPS`.
+///
 /// Returns the JobId immediately; the process runs in the background.
 pub fn spawn_script(
     schema: &ScriptSchema,
     values: HashMap<String, serde_json::Value>,
     secrets: HashMap<String, String>,
+    deps: HashMap<String, String>,
     python: PathBuf,
     channel: Channel<JobEvent>,
     registry: &JobRegistry,
@@ -87,8 +91,13 @@ pub fn spawn_script(
             .args(&argv)
             .envs(&env_vars)
             .env("PYTHONUNBUFFERED", "1")
-            .env("PYSHELL_OUTPUT_DIR", &run_dir)
-            .stdout(Stdio::piped())
+            .env("PYSHELL_OUTPUT_DIR", &run_dir);
+        // Cross-script dependencies, when the manifest declared any. Applied
+        // before the stdio setup purely for locality with the other env lines.
+        if let Some((name, value)) = deps_env(&deps) {
+            cmd.env(name, value);
+        }
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
 

@@ -6,10 +6,11 @@ mod error;
 mod logging;
 mod manifest;
 mod menu;
+mod repo;
 mod runner;
 mod store;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use runner::registry::JobRegistry;
 use tauri::Manager;
@@ -23,6 +24,10 @@ pub struct AppState {
     /// What the native Favorites submenu currently shows, so a menu rebuild is
     /// skipped when nothing about the pinned scripts changed.
     pub menu_favorites: Mutex<Vec<menu::Favorite>>,
+    /// The Script Store catalog for this session. Fetched on first open of the
+    /// dialog and kept so installs don't re-ask the GitHub API (60 requests/h
+    /// unauthenticated); the dialog's Refresh replaces it wholesale.
+    pub repo_catalog: Mutex<Option<Arc<repo::Catalog>>>,
 }
 
 impl AppState {
@@ -34,6 +39,7 @@ impl AppState {
             env_building: Mutex::new(std::collections::HashMap::new()),
             watcher_tx: Mutex::new(None),
             menu_favorites: Mutex::new(Vec::new()),
+            repo_catalog: Mutex::new(None),
         }
     }
 
@@ -210,6 +216,9 @@ pub fn run() {
             commands::scripts::script_folder,
             commands::scripts::open_in_pycharm,
             commands::scripts::open_in_terminal,
+            commands::repo::repo_catalog,
+            commands::repo::repo_install,
+            commands::repo::repo_update,
             commands::favorites::list_favorites,
             commands::favorites::toggle_favorite,
             commands::runner::run_script,

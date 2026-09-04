@@ -1,3 +1,5 @@
+import { ICON_NAMES } from "./script-icon";
+
 /**
  * The in-app scripting guide, shown by Help → How to Write a Script.
  *
@@ -92,9 +94,15 @@ outputs:
 | \`outputs\` | no | Artifacts and result kind |
 
 \`icon\` accepts either a bare emoji (\`icon: 🔧\`) or a vector icon by name,
-\`icon: lucide:<name>\` — e.g. \`lucide:rocket\`, \`lucide:database\`,
-\`lucide:terminal\`. An unknown or missing name falls back to plain text, so
-existing emoji manifests keep working unchanged.
+\`icon: lucide:<name>\`, where \`<name>\` is one of the identifiers below (a
+subset of [lucide.dev/icons](https://lucide.dev/icons)):
+
+\`\`\`
+${ICON_NAMES.join(", ")}
+\`\`\`
+
+An unknown or missing name falls back to plain text, so existing emoji
+manifests keep working unchanged.
 
 **\`runtime\`**
 
@@ -362,6 +370,43 @@ it. Press **Prepare Env**: PyShell shows the list, asks for confirmation, then
 installs into a virtual environment belonging to that script alone. Editing the
 file changes the environment key, which marks the env stale and rebuilds it on
 the next run.
+
+### Depending on another script
+
+A script can also depend on **another PyShell script** — reading its artifacts,
+calling it as a subprocess, or importing its code. Declare it by that script's
+manifest id:
+
+\`\`\`yaml
+needs:
+  - com.pyshell.sitecrawler
+\`\`\`
+
+PyShell then:
+
+- warns in the header when a needed script is not installed (\`Needs: …\`),
+- installs missing ones alongside it from the Store, chain included,
+- passes every installed one's folder to the run via \`PYSHELL_DEPS\` —
+  a JSON object \`{ "com.pyshell.sitecrawler": "/abs/folder" }\`:
+
+\`\`\`python
+import json, os, subprocess, sys
+
+deps = json.loads(os.environ.get("PYSHELL_DEPS", "{}"))
+crawler = deps.get("com.pyshell.sitecrawler")
+if crawler:
+    subprocess.run([sys.executable, f"{crawler}/main.py", "--url", url], check=True)
+\`\`\`
+
+\`needs\` is an expectation, not a lock: the run is not blocked when a
+dependency is missing — its key is simply absent from \`PYSHELL_DEPS\`, and the
+script can degrade the way the example does. For importing code from the
+dependency's folder (\`sys.path.insert(0, crawler)\`) remember that environments
+are isolated: its Python packages must also appear in your own
+\`requirements.txt\`.
+
+Document the human side — what to run first, and why — in a
+\`## Dependencies\` section of the script's \`pyshell.md\`.
 
 ## Documenting it for the operator
 

@@ -131,6 +131,32 @@ npx tauri build
 
 ### 1. Importing a script
 
+Import a local script with **+ Folder** (a project with `pyshell.yaml`) or
+**+ File** (a single `.py`) in the sidebar — or install one from the community
+repo with **+ Store** (also in File ▸ Add from Store…): pick a destination
+folder once, press **Install** on a script, and PyShell downloads it there and
+imports it exactly like a local folder. The destination is remembered for next
+time, the catalog is cached for the session (**Refresh** re-fetches it; GitHub
+allows 60 API requests per hour without a token, and a catalog fetch spends
+one), and installed scripts are badged — a script whose folder was deleted
+shows a **Missing folder** warning instead, pointing at the relink flow in the
+sidebar.
+
+When the repo carries a newer `version` than an installed script, the store
+offers **Update** instead of the badge — and a small dot on the **+ Store**
+button says so without opening it. The update replaces the script's folder with
+the repo's current contents (the old folder is kept as a `<name>.backup-…`
+sibling — only the newest backup survives, older ones are pruned — so nothing
+is lost), while presets, history and secrets — keyed by
+script id — carry over. The environment flips to *Stale* and rebuilds if the
+dependencies changed. Updates are blocked while the script is running.
+
+The catalog is checked against GitHub when the app starts and at most once
+every five minutes after that (a check costs 2 of the 60 unauthenticated API
+requests per hour); **Refresh** always re-checks immediately. File downloads
+are pinned to the repo's latest commit, so a fresh push is visible without
+waiting for GitHub's CDN cache.
+
 Three ways to describe a script's parameters, in priority order:
 
 1. **`pyshell.yaml`** — a YAML manifest beside the script
@@ -241,6 +267,8 @@ name: My Script
 description: Description
 icon: 🔧
 category: Tools
+needs:                          # other PyShell scripts this one expects, by id
+  - com.pyshell.sitecrawler
 
 runtime:
   entry: main.py               # relative to pyshell.yaml
@@ -295,6 +323,19 @@ outputs:
 
 The full guide — every field type, bindings, conditional visibility, structured
 events, artifacts — is built into the app: **Help → How to Write a Script**.
+
+### Script dependencies (`needs`)
+
+A script can expect **other PyShell scripts** to be installed — declare their
+manifest ids in `needs:` (see the example above). The header then warns with a
+`Needs: …` pill while any of them is missing, the sidebar marks scripts with
+dependencies (the marker turns amber while one is missing), the Store installs
+the missing ones alongside automatically, and at run time every installed
+dependency's folder is passed as a JSON object in the `PYSHELL_DEPS` env var
+(`json.loads(os.environ["PYSHELL_DEPS"])` → `{"com.pyshell.sitecrawler":
+"/abs/folder"}`). `needs` is an expectation, not a lock — a missing dependency
+never blocks the run, it is just absent from the map. The full guide covers the
+four dependency kinds (data, subprocess, import, optional synergy).
 
 ### Field types
 
@@ -397,10 +438,12 @@ pipes, not a PTY.
 A collection of scripts for PyShell lives in a separate repository:
 **[mono-ninja/PyShell-scripts](https://github.com/mono-ninja/PyShell-scripts)**.
 
-Each ships a manifest, so it works straight after import: download the folder (or
-a single `.py`) and add it with **Import Script…** (⌘O) or **Import Folder…**.
-PyShell installs the dependencies into an isolated venv itself — just press
-*Prepare Env*.
+Each ships a manifest, so it works straight after import. The easiest way is
+**+ Store** in the sidebar: browse the catalog, press **Install**, and the
+folder is downloaded into a destination you choose and imported in one step.
+The manual route still works too — download the folder (or a single `.py`) and
+add it with **Import Script…** (⌘O) or **Import Folder…**. PyShell installs
+the dependencies into an isolated venv itself — just press *Prepare Env*.
 
 ---
 
@@ -429,6 +472,12 @@ variable), not next to the script. The last 20 runs per script are kept.
 - **App Sandbox is off** — scripts have full access to the system; only import
   scripts you trust
 - **Dependencies** — `uv pip install -r` with sdist fallback for Python 3.13
+- **Script Store** — downloads files from the community repo over HTTPS but
+  never executes anything: installing only parses the manifest, and running is
+  the same explicit step as for a local script. Repo paths are validated
+  (no traversal, ASCII names only) and per-install size caps apply; files land
+  in a staging directory and are moved into place only when the download
+  completes.
 
 ## Releases
 

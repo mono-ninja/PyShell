@@ -143,6 +143,9 @@ fn schema_from_introspection(path: &Path, json: &serde_json::Value) -> Result<Sc
         description: None,
         icon: None,
         category: None,
+        // Introspection and the fallback cannot see cross-script deps —
+        // `needs` is a manifest-declared field only.
+        needs: Vec::new(),
         runtime: Runtime {
             entry: path.to_path_buf(),
             python: ">=3.11".to_string(),
@@ -253,6 +256,9 @@ pub fn fallback_schema(path: &Path) -> ScriptSchema {
         description: None,
         icon: None,
         category: None,
+        // Introspection and the fallback cannot see cross-script deps —
+        // `needs` is a manifest-declared field only.
+        needs: Vec::new(),
         runtime: Runtime {
             entry: path.to_path_buf(),
             python: ">=3.11".to_string(),

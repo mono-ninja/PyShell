@@ -17,7 +17,7 @@ import { useToast } from "./components/Toast";
 import { ContextMenu } from "./components/ContextMenu";
 
 const EMPTY_STRUCTURED: StructuredState = { progress: null, table: null, status: null, markdown: null, chart: null };
-import type { ScriptSchema, EnvStatus, ScriptState, HistoryEntry, Preset, ScriptDoc } from "./types/schema";
+import type { ScriptSchema, EnvStatus, ScriptState, HistoryEntry, Preset, ScriptDoc, ScriptEntry } from "./types/schema";
 import { ReadmePanel } from "./components/ReadmePanel";
 import { Tabs } from "./components/Tabs";
 import type { TabDef } from "./components/Tabs";
@@ -25,7 +25,10 @@ import { RunStatusBar } from "./components/RunStatusBar";
 import { useArtifacts } from "./hooks/useArtifacts";
 import { useFavorites } from "./hooks/useFavorites";
 import { useMenuAction } from "./hooks/useMenuAction";
+import { useStoreUpdates } from "./hooks/useStoreUpdates";
+import { missingNeeds } from "./lib/needs";
 import { ScriptingGuide } from "./components/ScriptingGuide";
+import { StoreDialog } from "./components/StoreDialog";
 import { useEscape } from "./lib/keyboard";
 import { BookIcon, CheckIcon, CloseIcon, PlayIcon, SearchIcon, StopIcon, TrashIcon } from "./components/icons";
 import { ScriptIcon } from "./lib/script-icon";
@@ -97,6 +100,7 @@ export function App() {
   const [scriptCode, setScriptCode] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [showStore, setShowStore] = useState(false);
   const [readme, setReadme] = useState<ScriptDoc | null>(null);
   const [pane, setPane] = useState<PaneId>("params");
   // Content that landed while its tab was hidden, so the tab can say so.
@@ -110,6 +114,8 @@ export function App() {
   const [compareDiff, setCompareDiff] = useState<{ base: HistoryEntry; target: HistoryEntry } | null>(null);
   const [historySearch, setHistorySearch] = useState("");
   const [recentImports, setRecentImports] = useState<string[]>(loadRecentImports);
+  // Dot on "+ Store": installed scripts with a newer version in the catalog.
+  const storeUpdates = useStoreUpdates(scripts, showStore);
 
   useEffect(() => {
     if (!localStorage.getItem(ONBOARDING_KEY)) {
@@ -189,6 +195,13 @@ export function App() {
     if (!schema) return 0;
     return Object.keys(validateForm(schema.inputs, values)).length;
   }, [schema, values]);
+
+  // Manifest-declared dependencies that no imported script carries — shown as
+  // a warn pill in the header (satisfied ones are deliberately invisible).
+  const missing = useMemo(
+    () => (schema ? missingNeeds(schema.needs, scripts) : []),
+    [schema, scripts],
+  );
 
   const handleResetDefaults = useCallback(() => {
     if (!schema) return;
@@ -339,6 +352,18 @@ export function App() {
       notifyError(e, "Import failed");
     }
   }, [refresh, notifyError]);
+
+  // A Store install already imported on the Rust side; this only stitches it
+  // into the UI the way the local imports above do. The recent-imports menu
+  // lists folders, so the entry .py's parent is what gets remembered.
+  const handleStoreInstalled = useCallback((entry: ScriptEntry) => {
+    const folder = entry.path.split(/[/\\]/).slice(0, -1).join("/");
+    if (folder) saveRecentImport(folder);
+    setRecentImports(loadRecentImports());
+    refresh();
+    setView("script");
+    selectScript(entry.id);
+  }, [refresh, selectScript]);
 
   const handleRun = useCallback(async () => {
     if (!selectedId) return;
@@ -812,6 +837,9 @@ export function App() {
       case "import:folder":
         handleImport();
         break;
+      case "store:open":
+        setShowStore(true);
+        break;
       case "pane:params":
       case "pane:output":
       case "pane:results":
@@ -844,6 +872,7 @@ export function App() {
   useEscape(showCmdPreview, () => setShowCmdPreview(false), false);
   useEscape(showJobsPanel, () => setShowJobsPanel(false));
   useEscape(showGuide, () => setShowGuide(false));
+  useEscape(showStore, () => setShowStore(false));
 
   return (
     <div class="flex h-screen w-screen overflow-hidden bg-app text-fg">
@@ -854,6 +883,8 @@ export function App() {
         onImport={handleImport}
         onImportFile={handleImportFile}
         onImportPath={handleImportPath}
+        onOpenStore={() => setShowStore(true)}
+        storeUpdates={storeUpdates}
         recentImports={recentImports}
         onRelink={handleRelink}
         onRemove={handleRemove}
@@ -906,6 +937,17 @@ export function App() {
                 {isGuessed && (
                   <span class="pill shrink-0 bg-accent/12 text-accent" title={schema?.source === "pep723" ? "Schema inferred from PEP 723 metadata" : "No manifest found — schema is a bare fallback"}>
                     {schema?.source === "pep723" ? "PEP 723" : "Guessed"}
+                  </span>
+                )}
+                {/* Only *missing* dependencies get a pill — a satisfied one is
+                    business as usual, and needs-free scripts (the majority)
+                    must not grow a new element in the header. */}
+                {missing.length > 0 && (
+                  <span
+                    class="pill shrink-0 bg-warn/12 text-warn"
+                    title={`This script expects other scripts to be installed: ${missing.join(", ")}. Install them from the Store (+ Store) — installed ones are passed to it as PYSHELL_DEPS.`}
+                  >
+                    Needs: {missing.length === 1 ? missing[0] : `${missing.length} scripts`}
                   </span>
                 )}
               </div>
@@ -1416,6 +1458,15 @@ export function App() {
       {/* Script code viewer */}
       {showGuide && <ScriptingGuide onClose={() => setShowGuide(false)} />}
 
+      {showStore && (
+        <StoreDialog
+          scripts={scripts}
+          runningScripts={runningScripts}
+          onInstalled={handleStoreInstalled}
+          onClose={() => setShowStore(false)}
+        />
+      )}
+
       {showCode && (
         <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] backdrop-blur-sm" onClick={() => setShowCode(false)}>
           <div class="mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
@@ -1481,11 +1532,25 @@ export function App() {
               network access to download Python interpreters and packages via
               <code class="mx-0.5 rounded bg-fg/10 px-1 font-mono text-[12px]">uv</code>.
             </p>
-            <p class="mb-4 text-[13px] leading-relaxed text-muted">
+            <p class="mb-3 text-[13px] leading-relaxed text-muted">
               Scripts run locally on your machine with full system access
               (no sandbox). Import only scripts you trust.
             </p>
-            <div class="flex justify-end">
+            <p class="mb-4 text-[13px] leading-relaxed text-muted">
+              Need something to run? The{" "}
+              <span class="font-medium text-muted">+ Store</span> button in the sidebar
+              installs ready-made scripts from the community repo.
+            </p>
+            <div class="flex justify-end gap-2">
+              <button
+                class="btn btn-secondary px-3 py-1.5"
+                onClick={() => {
+                  dismissOnboarding();
+                  setShowStore(true);
+                }}
+              >
+                Browse the Store
+              </button>
               <button class="btn btn-primary px-3 py-1.5" autoFocus onClick={dismissOnboarding}>
                 Got it
               </button>

@@ -1,0 +1,81 @@
+name: CI
+
+# The four checks CLAUDE.md calls "the pre-commit gate", plus the one thing
+# nothing else in the project does: compiling the `#[cfg(windows)]` code.
+# release.yml builds only on tags and runs no checks, so this is what stands
+# between a broken main and a broken release.
+#
+# Order matters on the checks job (same as locally): `cargo test` must run
+# before `tsc`, because it generates the gitignored ts-rs bindings the TS
+# build compiles against. `npm run fetch-uv` must come before any Rust step —
+# `tauri_build` copies every `externalBin` in `build.rs`, so a missing uv
+# sidecar fails even `cargo check`.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Fetch uv sidecar
+        run: npm run fetch-uv
+
+      # Generates the ts-rs bindings AND runs the Rust suite (the unix-gated
+      # process tests included — macOS is a unix runner).
+      - name: Rust tests (+ bindings)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Rust check (warning-free)
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Frontend tests
+        run: npm test
+
+  # The Windows runner's host target IS x86_64-pc-windows-msvc, so a plain
+  # `cargo check` compiles every `#[cfg(windows)]` path in runner/ — the code
+  # CLAUDE.md calls "compiled by nothing" on a Mac. Check only, deliberately:
+  # the Windows test paths of the process tests have never been executed, and
+  # a red suite on day one would just get the job disabled.
+  windows-compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Fetch uv sidecar
+        run: npm run fetch-uv -- x86_64-pc-windows-msvc
+
+      - name: cargo check (compiles the #[cfg(windows)] code)
+        run: cargo check --manifest-path src-tauri/Cargo.toml

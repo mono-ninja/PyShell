@@ -14,6 +14,8 @@ export type { Condition } from "./bindings/Condition";
 export type { Outputs } from "./bindings/Outputs";
 export type { ResultKind } from "./bindings/ResultKind";
 export type { ScriptEntry } from "./bindings/ScriptEntry";
+export type { RepoScript } from "./bindings/RepoScript";
+export type { RepoInstallResult } from "./bindings/RepoInstallResult";
 export type { EnvStatus } from "./bindings/EnvStatus";
 export type { DiskUsage } from "./bindings/DiskUsage";
 export type { Artifact } from "./bindings/Artifact";

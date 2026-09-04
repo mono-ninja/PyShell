@@ -21,6 +21,10 @@ struct YamlManifest {
     icon: Option<String>,
     #[serde(default)]
     category: Option<String>,
+    /// Other PyShell scripts this one expects (by manifest id). See
+    /// `ScriptSchema::needs`.
+    #[serde(default)]
+    needs: Vec<String>,
     runtime: RuntimeYaml,
     #[serde(default)]
     inputs: Vec<InputSpec>,
@@ -65,6 +69,7 @@ pub fn parse_yaml_manifest(manifest_path: &Path) -> Result<ScriptSchema> {
         description: manifest.description,
         icon: manifest.icon,
         category: manifest.category,
+        needs: manifest.needs,
         runtime: Runtime {
             entry,
             python: manifest.runtime.python,
@@ -190,5 +195,87 @@ mod tests {
         assert!(schema.outputs.artifacts.contains(&"*.html".to_string()));
         assert!(schema.outputs.artifacts.contains(&"*.json".to_string()));
         assert!(schema.outputs.artifacts.contains(&"*.sarif".to_string()));
+    }
+
+    /// Write `content` as a pyshell.yaml into a fresh temp dir, with a dummy
+    /// entry file so `entry` resolution has something to point at.
+    fn dir_with_manifest(content: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("pyshell-yaml-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.py"), b"print()\n").unwrap();
+        std::fs::write(dir.join("pyshell.yaml"), content).unwrap();
+        dir
+    }
+
+    /// `version` is documented as an arbitrary string, but every manifest in
+    /// the community repo writes it as a plain integer (`version: 1`), and a
+    /// quoted manifest there would be the exception. This test pins that the
+    /// scalar still parses — otherwise every Script Store install would land
+    /// with a schema_error and a guessed form.
+    #[test]
+    fn version_accepts_a_plain_integer_scalar() {
+        let dir = dir_with_manifest(
+            "schema: 1\nid: x.y\nname: X\nversion: 1\nruntime:\n  entry: main.py\n  python: \">=3\"\n",
+        );
+        let schema = parse_yaml_manifest(&dir.join("pyshell.yaml"))
+            .expect("plain integer version must parse");
+        assert_eq!(schema.version.as_deref(), Some("1"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn version_still_accepts_a_quoted_string() {
+        let dir = dir_with_manifest(
+            "schema: 1\nid: x.y\nname: X\nversion: \"1.2.0\"\nruntime:\n  entry: main.py\n  python: \">=3\"\n",
+        );
+        let schema = parse_yaml_manifest(&dir.join("pyshell.yaml")).unwrap();
+        assert_eq!(schema.version.as_deref(), Some("1.2.0"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A script can declare that it expects other scripts to be installed.
+    /// Absent must stay an empty list — every existing manifest has no
+    /// `needs`.
+    #[test]
+    fn needs_parses_and_defaults_to_empty() {
+        let dir = dir_with_manifest(
+            "schema: 1\nid: x.y\nname: X\nneeds:\n  - com.pyshell.sitecrawler\n  - local.abc\nruntime:\n  entry: main.py\n  python: \">=3\"\n",
+        );
+        let schema = parse_yaml_manifest(&dir.join("pyshell.yaml")).unwrap();
+        assert_eq!(
+            schema.needs,
+            vec!["com.pyshell.sitecrawler".to_string(), "local.abc".to_string()]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let plain = dir_with_manifest(
+            "schema: 1\nid: x.y\nname: X\nruntime:\n  entry: main.py\n  python: \">=3\"\n",
+        );
+        let schema = parse_yaml_manifest(&plain.join("pyshell.yaml")).unwrap();
+        assert!(schema.needs.is_empty());
+        // …and serializing a schema without needs must not write the field,
+        // so a generated manifest stays byte-identical to before.
+        let yaml = serde_yaml::to_string(&schema).unwrap();
+        assert!(!yaml.contains("needs"));
+        let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    /// The shipped example pins the whole `needs` path against drift: the
+    /// field parses, and it references an id another example really carries.
+    #[test]
+    fn test_parse_needs_demo_yaml() {
+        let yaml_path = std::path::Path::new("../examples/needs-demo/pyshell.yaml");
+        if !yaml_path.exists() {
+            eprintln!("Skipping test: {} not found", yaml_path.display());
+            return;
+        }
+        let schema = parse_yaml_manifest(yaml_path).expect("YAML should parse");
+        assert_eq!(schema.id, "com.pyshell.example.needsdemo");
+        assert_eq!(schema.needs, vec!["com.pyshell.example.hello".to_string()]);
+        // The dependency id must match a real example, or the demo would
+        // warn about a missing dependency forever.
+        let hello = parse_yaml_manifest(std::path::Path::new("../examples/hello/pyshell.yaml"))
+            .expect("hello example should parse");
+        assert_eq!(hello.id, schema.needs[0]);
     }
 }

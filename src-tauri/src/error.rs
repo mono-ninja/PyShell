@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("Secret error: {0}")]
     Secret(String),
 
+    #[error("Network error: {0}")]
+    Network(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

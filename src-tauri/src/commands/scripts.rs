@@ -145,6 +145,7 @@ fn finish_import(
         name: schema.name.clone(),
         icon: schema.icon.clone(),
         category: schema.category.clone(),
+        needs: schema.needs.clone(),
         path: entry_path.clone(),
         source: schema.source.clone(),
         reachable: true,
@@ -253,21 +254,23 @@ pub async fn reload_schema(
     clear_schema_error(&state, &script_id)?;
     save_schema(&state, &schema)?;
 
-    // Sync display fields (name, icon, category) from the reloaded schema into
-    // the script list entry. The sidebar reads from ScriptEntry, not
-    // ScriptSchema, so without this an edit to `name:` in pyshell.yaml never
-    // surfaces until the script is re-imported. (finish_import does the same
-    // copy at import time.)
+    // Sync display fields (name, icon, category, needs) from the reloaded
+    // schema into the script list entry. The sidebar reads from ScriptEntry,
+    // not ScriptSchema, so without this an edit to `name:` in pyshell.yaml
+    // never surfaces until the script is re-imported. (finish_import does the
+    // same copy at import time.)
     {
         let mut scripts = state.scripts.lock().unwrap();
         if let Some(entry) = scripts.iter_mut().find(|s| s.id == script_id) {
             let changed = entry.name != schema.name
                 || entry.icon != schema.icon
-                || entry.category != schema.category;
+                || entry.category != schema.category
+                || entry.needs != schema.needs;
             if changed {
                 entry.name = schema.name.clone();
                 entry.icon = schema.icon.clone();
                 entry.category = schema.category.clone();
+                entry.needs = schema.needs.clone();
                 let list = scripts.clone();
                 drop(scripts);
                 store::state::save_script_list(&state.app_support_dir, &list)?;
@@ -395,6 +398,7 @@ pub async fn duplicate_script(
         name: schema.name.clone(),
         icon: schema.icon.clone(),
         category: schema.category.clone(),
+        needs: schema.needs.clone(),
         path: entry.path.clone(),
         source: schema.source.clone(),
         reachable: true,
@@ -917,7 +921,10 @@ pub(crate) fn watch_paths_for(
     paths
 }
 
-fn load_schema(
+/// Read a script's saved schema (`schemas/{id}.json`). `pub(crate)` because
+/// `commands::repo` reads the installed version from it when enriching the
+/// store catalog.
+pub(crate) fn load_schema(
     state: &AppState,
     script_id: &str,
 ) -> Result<Option<manifest::model::ScriptSchema>> {
@@ -1072,6 +1079,7 @@ mod tests {
             name: "s1".into(),
             icon: None,
             category: None,
+            needs: Vec::new(),
             path: script_path,
             source: SchemaSource::Yaml,
             reachable: true,
@@ -1202,6 +1210,7 @@ mod tests {
             ("ip-domains/main.py", "ip-domains/pyshell.md"),
             // ninjascan also ships a README.md; the operator page must win.
             ("ninjascan/scan.py", "ninjascan/pyshell.md"),
+            ("needs-demo/main.py", "needs-demo/pyshell.md"),
             ("single-file.py", "single-file.md"),
             ("no-manifest.py", "no-manifest.md"),
             ("misbehaving.py", "misbehaving.md"),

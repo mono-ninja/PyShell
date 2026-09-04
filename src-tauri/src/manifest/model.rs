@@ -18,6 +18,21 @@ pub struct ScriptSchema {
     pub icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    /// Other PyShell scripts this one expects to be installed, by manifest id
+    /// (`com.pyshell.sitecrawler`). Declared, never enforced: the header shows
+    /// a pill for missing ones, the Store installs them along, and at run time
+    /// each installed dependency's folder is exposed via the `PYSHELL_DEPS`
+    /// env var. Empty for the overwhelming majority of scripts, hence skipped
+    /// in serialization — old saved schemas and generated manifests stay
+    /// byte-identical.
+    ///
+    /// The `#[ts(type)]` override keeps the generated binding honest about
+    /// that skip: over IPC the field is *absent* (undefined), never an empty
+    /// array — the same wire reality `description` has always had, except the
+    /// type now says so and the compiler enforces the guard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(type = "Array<string> | undefined")]
+    pub needs: Vec<String>,
     pub runtime: Runtime,
     pub inputs: Vec<InputSpec>,
     pub outputs: Outputs,
@@ -214,6 +229,65 @@ pub enum ResultKind {
 
 // --- API types ---
 
+/// One installable script from the community repo (the Script Store).
+///
+/// The listing fields (`name`, `description`, `icon`, `category`) come from the
+/// folder's `pyshell.yaml` in the repo, so the store shows exactly what the
+/// script will look like once imported. `dir` is the folder name inside the
+/// repo ("bot-hunter"), and `id` is the manifest id ("com.pyshell.bothunter")
+/// — the same id an imported `ScriptEntry` carries, which is how the frontend
+/// marks a store entry as already installed.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct RepoScript {
+    /// Folder name inside the repo; also the name of the local folder created
+    /// in the user-chosen destination.
+    pub dir: String,
+    /// Manifest id — matches `ScriptEntry::id` after import.
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Other store scripts this one needs, by manifest id — so one Install can
+    /// pull them in (`install_closure` in `repo.rs`). Absent over IPC when
+    /// empty (serde skip + the `#[ts(type)]` override, same reasoning as
+    /// `ScriptSchema::needs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(type = "Array<string> | undefined")]
+    pub needs: Vec<String>,
+    /// File count inside the repo folder (informational, shown in the store).
+    #[ts(type = "number")]
+    pub files: u64,
+    /// Total size of the folder's files (informational, shown in the store).
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    /// Version of the *imported* script with the same id, filled in by
+    /// `repo_catalog` when it hands the catalog to the frontend (the cached
+    /// catalog itself stays pure). `None` when the script is not installed or
+    /// its manifest declares no version — the frontend compares it with
+    /// `version` to offer an Update. `#[ts(optional = nullable)]` because
+    /// `skip_serializing_if` makes the field *absent* over IPC, not `null`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub installed_version: Option<String>,
+}
+
+/// What one Store install produced: the requested script plus any of its
+/// dependencies that were missing and got pulled in alongside. The dialog
+/// selects `entry` and mentions `extras` in its toast.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct RepoInstallResult {
+    pub entry: ScriptEntry,
+    pub extras: Vec<ScriptEntry>,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export, export_to = "../../src/types/bindings/")]
 pub struct ScriptEntry {
@@ -223,6 +297,15 @@ pub struct ScriptEntry {
     pub icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    /// The script's declared dependencies, synced from the schema at import
+    /// and reload the same way `name`/`icon`/`category` are — the sidebar
+    /// shows a chain marker for them without loading every schema.
+    ///
+    /// Absent over IPC when empty (serde skip + the `#[ts(type)]` override —
+    /// the wire reality the `needs.filter` crash taught us about).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(type = "Array<string> | undefined")]
+    pub needs: Vec<String>,
     pub path: PathBuf,
     #[serde(deserialize_with = "deserialize_source", default)]
     pub source: SchemaSource,

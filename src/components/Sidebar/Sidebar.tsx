@@ -3,13 +3,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ipc } from "../../lib/ipc";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { ScriptEntry } from "../../types/schema";
-import { ChevronIcon, ClockIcon, CloseIcon, EditorIcon, FolderIcon, GearIcon, RefreshIcon, SearchIcon, SortIcon, StarIcon, TerminalIcon } from "../icons";
+import { ChevronIcon, ClockIcon, CloseIcon, EditorIcon, FolderIcon, GearIcon, LinkIcon, RefreshIcon, SearchIcon, SortIcon, StarIcon, TerminalIcon } from "../icons";
 import { ScriptIcon } from "../../lib/script-icon";
 import { ContextMenu } from "../ContextMenu";
 import type { MenuItem } from "../ContextMenu";
 import { useToast } from "../Toast";
 import { useMenuAction } from "../../hooks/useMenuAction";
 import { useEscape, hasOverlay, isTypingTarget } from "../../lib/keyboard";
+import { missingNeeds } from "../../lib/needs";
 import { ExternalLink } from "../../lib/markdown";
 import { SCRIPTS_URL } from "../../lib/links";
 
@@ -119,6 +120,10 @@ interface SidebarProps {
   onImport: () => void;
   onImportFile: () => void;
   onImportPath?: (path: string) => void;
+  /** Open the Script Store dialog (community repo catalog). */
+  onOpenStore: () => void;
+  /** Installed scripts with a newer version in the store — dots the button. */
+  storeUpdates: number;
   recentImports: string[];
   onRelink: (id: string) => void;
   onRemove: (id: string) => void;
@@ -136,7 +141,7 @@ interface SidebarProps {
   onToggleFavorite: (id: string) => void;
 }
 
-export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile, onImportPath, recentImports, onRelink, onRemove, onDuplicate, onExportPresets, onImportPresets, onRebuildEnv, onRefreshScript, runningScripts, loading, view, onOpenSettings, favorites, onToggleFavorite }: SidebarProps) {
+export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile, onImportPath, onOpenStore, storeUpdates, recentImports, onRelink, onRemove, onDuplicate, onExportPresets, onImportPresets, onRebuildEnv, onRefreshScript, runningScripts, loading, view, onOpenSettings, favorites, onToggleFavorite }: SidebarProps) {
   const [relinking, setRelinking] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -215,6 +220,9 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
   const renderScriptRow = (s: ScriptEntry) => {
     const isRunning = runningScripts.includes(s.id);
     const favIndex = favorites.indexOf(s.id);
+    // `needs` is absent over IPC when empty — guard, never trust the field.
+    const needs = s.needs ?? [];
+    const missingDeps = needs.length > 0 ? missingNeeds(needs, scripts).length : 0;
     return (
       <div
         key={s.id}
@@ -240,6 +248,27 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
         )}
         <ScriptIcon icon={s.icon} size={15} class="shrink-0" />
         <span class="flex-1 truncate">{s.name}</span>
+        {/* Dependency marker: the chain says "this script is part of a
+            pipeline". Warn-colored while any dependency is missing — the
+            same signal the header pill carries, visible before selecting. */}
+        {needs.length > 0 && (
+          <span
+            class={`shrink-0 ${
+              s.id === selectedId
+                ? "text-white/70"
+                : missingDeps > 0
+                  ? "text-warn"
+                  : "text-subtle"
+            }`}
+            title={
+              missingDeps > 0
+                ? `Depends on ${needs.length} script${needs.length === 1 ? "" : "s"} — ${missingDeps} not installed (select it for details)`
+                : `Depends on ${needs.length} script${needs.length === 1 ? "" : "s"} — all installed`
+            }
+          >
+            <LinkIcon size={11} />
+          </span>
+        )}
         {/* The number is the shortcut, so it is shown rather than explained.
             Only the first nine get one — pinning a tenth script is allowed. */}
         {favIndex >= 0 && favIndex < 9 && (
@@ -398,11 +427,14 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
   };
 
   return (
-    <div class="vibrancy flex h-full w-64 shrink-0 flex-col border-r border-line">
+    // w-80 (was w-64): the title row carries three import buttons plus the
+    // recent-imports clock, and at 256px they only fit by wrapping. 320px
+    // keeps them on one line with room to spare.
+    <div class="vibrancy flex h-full w-80 shrink-0 flex-col border-r border-line">
       {/* Titlebar band: the window is frameless (titleBarStyle: Overlay), so the
           traffic lights float over this corner and this strip has to be draggable. */}
       <div data-tauri-drag-region class="flex items-center gap-1 px-3 pb-2 pt-8">
-        <span class="panel-title flex-1">Scripts</span>
+        <span class="panel-title min-w-0 flex-1 truncate">Scripts</span>
         <button
           class="btn btn-secondary"
           onClick={onImport}
@@ -416,6 +448,20 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
           title="Import a single .py file"
         >
           + File
+        </button>
+        <button
+          class="btn btn-secondary relative"
+          onClick={onOpenStore}
+          title={
+            storeUpdates > 0
+              ? `Script Store — ${storeUpdates} update${storeUpdates === 1 ? "" : "s"} available`
+              : "Download a script from the PyShell-scripts repo"
+          }
+        >
+          + Store
+          {storeUpdates > 0 && (
+            <span class="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-sidebar" />
+          )}
         </button>
         {recentImports.length > 0 && (
           <button
@@ -476,10 +522,15 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             with a <span class="font-mono">pyshell.yaml</span>, or{" "}
             <span class="font-medium text-muted">+ File</span> for a single script.
             <div class="mt-2 border-t border-line pt-2">
-              Need something to run? Ready-made scripts live at{" "}
-              <ExternalLink href={SCRIPTS_URL}>
-                PyShell-scripts
-              </ExternalLink>
+              Need something to run?{" "}
+              <button
+                class="font-medium text-accent hover:underline"
+                onClick={onOpenStore}
+              >
+                Browse the Store
+              </button>{" "}
+              — ready-made scripts from{" "}
+              <ExternalLink href={SCRIPTS_URL}>PyShell-scripts</ExternalLink>
               .
             </div>
           </div>

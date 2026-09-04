@@ -83,6 +83,15 @@ pub fn parse_pep723(path: &Path) -> Result<Option<ScriptSchema>> {
         description: pyshell.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
         icon: pyshell.get("icon").and_then(|v| v.as_str()).map(|s| s.to_string()),
         category: pyshell.get("category").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        needs: pyshell
+            .get("needs")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         runtime: Runtime {
             entry: path.to_path_buf(),
             python,
