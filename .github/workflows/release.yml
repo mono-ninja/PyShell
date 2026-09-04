@@ -31,14 +31,19 @@ jobs:
           # `fetch-uv universal-apple-darwin` downloads both slices and lipos
           # them — Tauri does not merge external binaries itself, it just looks
           # for `binaries/uv-universal-apple-darwin`.
+          #
+          # Windows x86_64-pc-windows-msvc was here and was removed after the
+          # v0.3.0 tag build failed on the Windows runner (exit 1; cause not
+          # diagnosed from the logs available). Re-add it by restoring the
+          # include below once the failure is understood:
+          #   - platform: windows-latest
+          #     target: x86_64-pc-windows-msvc
+          #     rust-targets: x86_64-pc-windows-msvc
+          #     uv-triples: x86_64-pc-windows-msvc
           - platform: macos-latest
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             uv-triples: universal-apple-darwin
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            rust-targets: x86_64-pc-windows-msvc
-            uv-triples: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
@@ -66,8 +71,7 @@ jobs:
       - run: npm ci
 
       # Sidecar(s) for this target. fetch-uv uses only Node built-ins, so it
-      # runs before any Rust step. `bash` is the shell on the Windows runner
-      # too (Git Bash), so the same loop works everywhere.
+      # runs before any Rust step.
       - name: Fetch uv sidecar(s)
         shell: bash
         run: |
@@ -88,7 +92,7 @@ jobs:
       # publishes nothing.
       #
       # Code signing / notarization, and ONLY when a certificate is actually
-      # configured and we're on macOS. An unset secret renders as an empty
+      # configured. An unset secret renders as an empty
       # string, but listing it under `env:` still DEFINES the variable — and
       # tauri's bundler checks only that APPLE_CERTIFICATE is present, so an
       # empty value made it try to import an empty certificate and killed the
@@ -97,7 +101,7 @@ jobs:
       # Exporting through $GITHUB_ENV leaves the variables genuinely absent
       # when there is no certificate, which is what an unsigned build needs.
       - name: Enable Apple code signing
-        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERT == 'true'
+        if: env.HAS_APPLE_CERT == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

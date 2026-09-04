@@ -10,8 +10,10 @@ interpreter each script asks for — so **Python does not need to be installed**
 
 ## Platforms
 
-- macOS (arm64 + x86_64)
-- Windows x86_64
+- macOS (arm64 + x86_64) — the only platform with released builds
+- Windows x86_64 — source builds only for now: the CI compile check and the
+  release installers were removed after the v0.3.0 tag build failed on the
+  Windows runner, and the `#[cfg(windows)]` code is not verified by anything
 - Linux — after v1
 
 ---
@@ -481,9 +483,9 @@ variable), not next to the script. The last 20 runs per script are kept.
 
 ## Releases
 
-There is no CI workflow — the checks above have to be run locally before a
-commit. The only workflow in the repository,
-`.github/workflows/release.yml`, builds the app and runs no checks.
+CI (`.github/workflows/ci.yml`) runs the checks above on every push to main
+and every PR — macOS only; the Windows job was removed after a failing tag
+build and stays out until the failure is understood.
 
 A release is built from a tag:
 
@@ -492,11 +494,12 @@ A release is built from a tag:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-The workflow builds a universal `.dmg` for macOS (arm64 + x86_64 in one file) and
-installers for Windows x86_64, then creates a **draft** release — the artifacts
-have to be checked and published by hand. Before building it necessarily runs
-`npm run fetch-uv` (sidecar + uv licenses) and `cargo test` (generates the ts-rs
-bindings); without those two steps the build fails before bundling.
+The workflow builds a universal `.dmg` for macOS (arm64 + x86_64 in one file),
+then creates a **draft** release — the artifacts have to be checked and
+published by hand. Windows installers are not built for now (see Platforms).
+Before building it necessarily runs `npm run fetch-uv` (sidecar + uv licenses)
+and `cargo test` (generates the ts-rs bindings); without those two steps the
+build fails before bundling.
 
 Builds are unsigned — see [Installing and first launch](#installing-and-first-launch)
 for what users will see. Auto-update (`tauri-plugin-updater`) is deliberately
