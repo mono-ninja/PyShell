@@ -10,22 +10,28 @@ interpreter each script asks for — so **Python does not need to be installed**
 
 ## Platforms
 
-- macOS (arm64 + x86_64) — the only platform with released builds
-- Windows x86_64 — source builds only for now: the CI compile check and the
-  release installers were removed after the v0.3.0 tag build failed on the
-  Windows runner, and the `#[cfg(windows)]` code is not verified by anything
-- Linux — after v1
+**macOS only, for now** — arm64 and x86_64, shipped as one universal build.
+That is also the only platform anything is built or tested on: `bundle.targets`
+in `tauri.conf.json` is `["app", "dmg"]`, and both CI and the release workflow
+run on macOS runners alone.
+
+- **Windows** — the `#[cfg(windows)]` code in `runner/` exists but is compiled
+  by nothing and has never been executed. Its blocker is written up in
+  `src-tauri/build.rs`: the test binary cannot load, because `rfd` needs a
+  ComCtl32 v6 manifest that only the app binary gets. Re-enabling it is a
+  scoped piece of work, not a flag.
+- **Linux** — out of scope (see `AGENTS.md`).
 
 ---
 
 ## Installing and first launch
 
-Download the installer for your platform from the
+Download the `.dmg` from the
 [Releases](https://github.com/mono-ninja/PyShell/releases) page.
 
-**Builds are not code-signed**, so both systems will warn you the first time.
-This is expected — signing requires a paid Apple Developer ID and a Windows
-certificate. Every later launch opens normally.
+**Builds are not code-signed**, so macOS will warn you the first time. This is
+expected — signing requires a paid Apple Developer ID. Every later launch opens
+normally.
 
 ### macOS
 
@@ -47,11 +53,6 @@ xattr -dr com.apple.quarantine /Applications/PyShell.app
 
 Alternatively, launch it once, then open **System Settings → Privacy & Security**
 and press **Open Anyway** next to the PyShell notice.
-
-### Windows
-
-Run the `.msi` (or `.exe`) installer. SmartScreen will show *"Windows protected
-your PC"*: click **More info** → **Run anyway**.
 
 ### First run inside the app
 
@@ -500,19 +501,20 @@ and the run folders with one number).
 ## Releases
 
 CI (`.github/workflows/ci.yml`) runs the checks above on every push to main
-and every PR — macOS only; the Windows job was removed after a failing tag
-build and stays out until the failure is understood.
+and every PR — macOS only. The Windows job was removed after a failing tag
+build; the cause is now understood (see Platforms) but not fixed, so it stays
+out.
 
 A release is built from a tag:
 
 ```bash
 # bump the version in package.json, src-tauri/Cargo.toml and tauri.conf.json together
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.4.0 && git push origin v0.4.0
 ```
 
 The workflow builds a universal `.dmg` for macOS (arm64 + x86_64 in one file),
 then creates a **draft** release — the artifacts have to be checked and
-published by hand. Windows installers are not built for now (see Platforms).
+published by hand. No Windows or Linux artifacts are produced (see Platforms).
 Before building it necessarily runs `npm run fetch-uv` (sidecar + uv licenses)
 and `cargo test` (generates the ts-rs bindings); without those two steps the
 build fails before bundling.

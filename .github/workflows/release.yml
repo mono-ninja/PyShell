@@ -32,24 +32,34 @@ jobs:
           # them — Tauri does not merge external binaries itself, it just looks
           # for `binaries/uv-universal-apple-darwin`.
           #
-          # Windows x86_64-pc-windows-msvc: restored 2026-09-05. The original
-          # removal was a `cargo test` binary dying at load with
-          # 0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND — `rfd`'s TaskDialogIndirect
-          # needs ComCtl32 v6, which a test binary only gets when a manifest
-          # requests it; `build.rs` now embeds that via `cargo:rustc-link-arg-tests`
-          # (test targets only, MSVC only — see AGENTS.md, Build). NOT yet
-          # verified on a real Windows machine: run this workflow via
-          # `workflow_dispatch` (it builds without publishing) and watch the
-          # "Generate bindings + run Rust tests" step. If it passes, also
-          # re-add the `windows-compile` job to ci.yml.
+          # Windows is OUT, and the blocker is the `cargo test` step below, not
+          # the app: the lib's test binary dies at load with
+          # 0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND because `rfd`'s
+          # `TaskDialogIndirect` needs a ComCtl32 v6 manifest that `tauri_build`
+          # gives to the app binary only (see the long note in `build.rs`).
+          # A 2026-09-05 attempt to hand test binaries that manifest via
+          # `cargo:rustc-link-arg-tests` made it worse — cargo rejects the
+          # instruction outright when the package has no `tests/` target — and
+          # was reverted.
+          #
+          # Re-enabling means first deciding how Windows gets its ts-rs
+          # bindings without running the lib tests (e.g. upload them from the
+          # macOS job and download here), then finding a Windows machine to
+          # actually run `runner::group` / `runner::stream`, whose
+          # `#[cfg(windows)]` paths have never executed anywhere.
+          #
+          # And uncommenting this block is not enough on its own:
+          # `bundle.targets` in tauri.conf.json is `["app", "dmg"]`, so a
+          # Windows job would build fine and produce no installer. See
+          # AGENTS.md, "Restoring Windows takes three edits, not one".
+          #   - platform: windows-latest
+          #     target: x86_64-pc-windows-msvc
+          #     rust-targets: x86_64-pc-windows-msvc
+          #     uv-triples: x86_64-pc-windows-msvc
           - platform: macos-latest
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             uv-triples: universal-apple-darwin
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            rust-targets: x86_64-pc-windows-msvc
-            uv-triples: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
