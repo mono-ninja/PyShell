@@ -18,6 +18,11 @@ use crate::runner::registry::JobRegistry;
 /// `deps` is the resolved `needs` map (id → folder) for scripts that declared
 /// dependencies; it reaches the child as `PYSHELL_DEPS`.
 ///
+/// `retention` is how many runs to keep per script — applied to **both** the
+/// on-disk run folders and the History entries, from one user setting, so the
+/// History tab can never offer Log/Files for a run whose folder has already
+/// been pruned.
+///
 /// Returns the JobId immediately; the process runs in the background.
 pub fn spawn_script(
     schema: &ScriptSchema,
@@ -29,6 +34,7 @@ pub fn spawn_script(
     registry: &JobRegistry,
     output_dir: PathBuf,
     state_dir: PathBuf,
+    retention: usize,
     on_start: impl FnOnce(()) -> bool + Send + 'static,
     on_finish: impl FnOnce(bool, String) + Send + 'static,
 ) -> Result<JobId, String> {
@@ -118,7 +124,10 @@ pub fn spawn_script(
         // to a Job Object before any grandchildren spawn (Plan.md §M1)
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
+            // `creation_flags` is tokio's own inherent method (it forwards to
+            // std's `CommandExt`), so importing that trait here only produces
+            // an unused-import warning — and CI treats warnings as noise to
+            // keep at zero.
             const CREATE_SUSPENDED: u32 = 0x00000004;
             const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
             cmd.creation_flags(CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP);
@@ -231,8 +240,10 @@ pub fn spawn_script(
             let _ = std::fs::remove_file(temp);
         }
 
-        // Output retention: keep only N=20 last runs per script (Plan.md §M5)
-        retain_last_runs(&output_dir, &script_id, 20);
+        // Output retention: keep only the last `retention` runs per script
+        // (Plan.md §M5). Same number as the History cap below — one setting,
+        // so the two lists never disagree about what exists.
+        retain_last_runs(&output_dir, &script_id, retention);
 
         // Save history entry (Plan.md §M6)
         let (exit_code, duration_ms_val) = match &result {
@@ -245,6 +256,7 @@ pub fn spawn_script(
             &values,
             exit_code,
             duration_ms_val,
+            retention,
         );
 
         // Remove from registry
@@ -325,7 +337,9 @@ fn retain_last_runs(output_dir: &std::path::Path, script_id: &str, keep: usize) 
     }
 }
 
-/// Save a history entry after a job finishes (Plan.md §M6).
+/// Save a history entry after a job finishes (Plan.md §M6). `keep` is the
+/// retention setting — the same number that prunes run folders, so the History
+/// list and the folders on disk stay in step.
 fn save_history_entry(
     state_dir: &std::path::Path,
     script_id: &str,
@@ -333,6 +347,7 @@ fn save_history_entry(
     values: &HashMap<String, serde_json::Value>,
     exit_code: Option<i32>,
     duration_ms: u64,
+    keep: usize,
 ) {
     use crate::manifest::model::HistoryEntry;
     use crate::store;
@@ -359,9 +374,9 @@ fn save_history_entry(
 
     current.history.push(entry);
 
-    // Keep only last N=50 entries (Plan.md §M6)
-    if current.history.len() > 50 {
-        let start = current.history.len() - 50;
+    // Keep only the last `keep` entries (Plan.md §M6)
+    if current.history.len() > keep {
+        let start = current.history.len() - keep;
         current.history = current.history[start..].to_vec();
     }
 
@@ -439,7 +454,7 @@ mod tests {
         values.insert("name".to_string(), serde_json::json!("test"));
         values.insert("count".to_string(), serde_json::json!(42));
 
-        save_history_entry(&dir, "script1", "job-1", &values, Some(0), 1000);
+        save_history_entry(&dir, "script1", "job-1", &values, Some(0), 1000, 50);
 
         let state = crate::store::state::load_script_state(&dir, "script1");
         assert_eq!(state.history.len(), 1);
@@ -458,7 +473,7 @@ mod tests {
         values.insert("api_key".to_string(), serde_json::json!("__secret_set__"));
         values.insert("name".to_string(), serde_json::json!("test"));
 
-        save_history_entry(&dir, "script1", "job-1", &values, Some(0), 100);
+        save_history_entry(&dir, "script1", "job-1", &values, Some(0), 100, 50);
 
         let state = crate::store::state::load_script_state(&dir, "script1");
         assert!(!state.history[0].values.contains_key("api_key"));
@@ -467,12 +482,12 @@ mod tests {
     }
 
     #[test]
-    fn save_history_entry_caps_at_50() {
+    fn save_history_entry_caps_at_keep() {
         let dir = tmp_dir();
         let values = HashMap::new();
 
         for i in 0..55 {
-            save_history_entry(&dir, "script1", &format!("job-{}", i), &values, Some(0), 100);
+            save_history_entry(&dir, "script1", &format!("job-{}", i), &values, Some(0), 100, 50);
         }
 
         let state = crate::store::state::load_script_state(&dir, "script1");
@@ -480,6 +495,24 @@ mod tests {
         // The first 5 should have been trimmed
         assert_eq!(state.history[0].job_id.as_deref(), Some("job-5"));
         assert_eq!(state.history[49].job_id.as_deref(), Some("job-54"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_history_entry_honours_a_smaller_keep() {
+        // The retention setting is user-tunable now; the cap must follow it
+        // exactly rather than a hardcoded 50.
+        let dir = tmp_dir();
+        let values = HashMap::new();
+
+        for i in 0..10 {
+            save_history_entry(&dir, "script1", &format!("job-{}", i), &values, Some(0), 100, 3);
+        }
+
+        let state = crate::store::state::load_script_state(&dir, "script1");
+        assert_eq!(state.history.len(), 3);
+        assert_eq!(state.history[0].job_id.as_deref(), Some("job-7"));
+        assert_eq!(state.history[2].job_id.as_deref(), Some("job-9"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

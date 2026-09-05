@@ -20,13 +20,20 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::manifest::model::RepoScript;
+use crate::manifest::model::{AppRelease, RepoScript};
 
 /// The community script collection this module talks to. Split into
 /// owner/name because every URL is built from the parts.
 const REPO_OWNER: &str = "mono-ninja";
 const REPO_NAME: &str = "PyShell-scripts";
 const REPO_BRANCH: &str = "main";
+
+/// PyShell's **own** repository — where its releases live. Deliberately a
+/// second pair of constants rather than a reuse of the three above: that repo
+/// is the script collection, this one is the application, and they move
+/// independently.
+const APP_REPO_OWNER: &str = "mono-ninja";
+const APP_REPO_NAME: &str = "PyShell";
 
 /// Concurrency cap for raw file downloads. Six parallel connections is polite
 /// to the CDN and plenty for folders of this size.
@@ -38,6 +45,12 @@ const DOWNLOAD_CONCURRENCY: usize = 6;
 /// One refresh costs 2 of the 60 unauthenticated API requests per hour, so
 /// five minutes is far below any limit.
 const CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// How long an update check's answer stays good. Releases appear a few times a
+/// year, so re-asking GitHub more often than this only spends the 60
+/// unauthenticated requests per hour the Store also draws on. A manual check
+/// from the menu ignores it.
+const UPDATE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 // Sanity caps for one install. The repo's largest folder is a few dozen small
 // files; anything past these numbers means the tree response is not what we
@@ -88,6 +101,28 @@ impl Catalog {
         }
         files.sort();
         Ok(files)
+    }
+}
+
+/// The answer of one update check, kept in `AppState` so a session does not
+/// re-ask GitHub on every render. `release` is `None` when the running build
+/// is already current — the *absence of an update* is worth caching too.
+pub struct UpdateCheck {
+    pub release: Option<AppRelease>,
+    checked_at: std::time::SystemTime,
+}
+
+impl UpdateCheck {
+    pub fn new(release: Option<AppRelease>) -> Self {
+        Self { release, checked_at: std::time::SystemTime::now() }
+    }
+
+    /// True while the answer is younger than [`UPDATE_TTL`].
+    pub fn is_fresh(&self) -> bool {
+        std::time::SystemTime::now()
+            .duration_since(self.checked_at)
+            .map(|age| age <= UPDATE_TTL)
+            .unwrap_or(false)
     }
 }
 
@@ -857,6 +892,109 @@ async fn download_files(
     Ok(())
 }
 
+// --- The app's own updates --------------------------------------------------
+//
+// Not the Script Store: this checks whether a newer *PyShell* has been
+// published, and it stops at telling the user. There is no auto-update — the
+// Tauri updater needs a signing key and a `latest.json` the release pipeline
+// does not produce — so the whole feature is one API call plus a link to the
+// release page.
+
+fn latest_release_url() -> String {
+    format!("https://api.github.com/repos/{APP_REPO_OWNER}/{APP_REPO_NAME}/releases/latest")
+}
+
+/// Response of `/releases/latest` — only the two fields the notice needs.
+#[derive(Deserialize)]
+struct ReleaseResponse {
+    tag_name: String,
+    html_url: String,
+}
+
+/// The newest **published** release of PyShell, or `None` when there is none.
+///
+/// `/releases/latest` ignores drafts and pre-releases by design, and answers
+/// **404** when every release is still a draft. That is the normal state of a
+/// repo whose maintainer reviews builds before publishing them, not a failure
+/// worth a toast, so it maps to `None` rather than an error.
+pub async fn latest_release() -> Result<Option<AppRelease>> {
+    let resp = client().get(latest_release_url()).send().await.map_err(net)?;
+    let status = resp.status();
+    if status.as_u16() == 404 {
+        tracing::info!(
+            "{APP_REPO_OWNER}/{APP_REPO_NAME} has no published release (drafts are invisible \
+             to the API)"
+        );
+        return Ok(None);
+    }
+    if let Some(e) = rate_limit(status) {
+        return Err(e);
+    }
+    if !status.is_success() {
+        return Err(AppError::Network(format!(
+            "GitHub returned HTTP {status} for the latest release"
+        )));
+    }
+    let body: ReleaseResponse = resp.json().await.map_err(net)?;
+    Ok(Some(AppRelease {
+        version: normalize_version(&body.tag_name),
+        url: body.html_url,
+    }))
+}
+
+/// The release to offer as an update: the latest one, but only if it is newer
+/// than `current`. `None` means "nothing to offer" — up to date, no published
+/// release, or a tag that could not be read as a version.
+///
+/// The running version is passed in rather than read from
+/// `env!("CARGO_PKG_VERSION")` on purpose. Tauri takes the app's version from
+/// `tauri.conf.json` when that field is set and only falls back to
+/// `Cargo.toml`, so the two can drift — and the compiled-in constant would
+/// then disagree with the version Settings shows and the bundle carries,
+/// offering an update to a version already installed. The caller hands over
+/// `package_info().version`, which is the same value on every side.
+pub async fn app_update(current: &str) -> Result<Option<AppRelease>> {
+    Ok(latest_release()
+        .await?
+        .filter(|r| is_newer(current, &r.version)))
+}
+
+/// Tag → version: `v0.4.0` and `0.4.0` are the same release.
+fn normalize_version(tag: &str) -> String {
+    tag.trim().trim_start_matches('v').to_string()
+}
+
+/// Split a version into its numeric components, or `None` if it is not one.
+///
+/// Deliberately not a semver dependency: the tags this compares are
+/// `vMAJOR.MINOR.PATCH`, and any suffix (`-beta`, `+build`) is cut before
+/// parsing because `/releases/latest` never returns a pre-release anyway.
+fn version_parts(v: &str) -> Option<Vec<u64>> {
+    let core = normalize_version(v);
+    let core = core.split(['-', '+']).next()?;
+    let parts: Option<Vec<u64>> = core.split('.').map(|p| p.parse().ok()).collect();
+    parts.filter(|p| !p.is_empty())
+}
+
+/// True when `latest` is strictly newer than `current`.
+///
+/// Missing components count as zero, so `0.4` is newer than `0.3.9` and equal
+/// to `0.4.0`. Anything unparseable on either side compares as *not* newer: a
+/// malformed tag must not nag at every launch.
+fn is_newer(current: &str, latest: &str) -> bool {
+    let (Some(cur), Some(new)) = (version_parts(current), version_parts(latest)) else {
+        return false;
+    };
+    for i in 0..cur.len().max(new.len()) {
+        let a = cur.get(i).copied().unwrap_or(0);
+        let b = new.get(i).copied().unwrap_or(0);
+        if a != b {
+            return b > a;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1347,5 +1485,56 @@ mod tests {
             }
         }
         n
+    }
+
+    // --- App update comparison ----------------------------------------------
+
+    #[test]
+    fn a_higher_component_is_an_update() {
+        assert!(is_newer("0.3.1", "0.3.2"));
+        assert!(is_newer("0.3.1", "0.4.0"));
+        assert!(is_newer("0.9.9", "1.0.0"));
+        assert!(is_newer("0.3.1", "0.10.0"), "components compare as numbers, not text");
+    }
+
+    #[test]
+    fn the_same_or_older_version_is_not_an_update() {
+        assert!(!is_newer("0.3.1", "0.3.1"));
+        assert!(!is_newer("0.3.1", "0.3.0"));
+        assert!(!is_newer("1.0.0", "0.9.9"));
+    }
+
+    #[test]
+    fn the_tag_prefix_and_missing_components_do_not_matter() {
+        assert!(is_newer("0.3.1", "v0.3.2"), "tags carry a v, package versions do not");
+        assert!(is_newer("0.3.1", "0.4"), "a missing component reads as zero");
+        assert!(!is_newer("0.4.0", "0.4"));
+    }
+
+    #[test]
+    fn an_unreadable_version_never_offers_an_update() {
+        // A hand-made tag must not turn into a permanent "update available".
+        assert!(!is_newer("0.3.1", "nightly"));
+        assert!(!is_newer("0.3.1", ""));
+        assert!(!is_newer("0.3.1", "v"));
+        assert!(!is_newer("", "0.4.0"));
+    }
+
+    #[test]
+    fn a_prerelease_suffix_is_cut_before_comparing() {
+        assert!(!is_newer("0.4.0", "v0.4.0-beta.1"));
+        assert!(is_newer("0.3.1", "v0.4.0-beta.1"));
+    }
+
+    #[test]
+    #[ignore = "hits the live GitHub API — run with `cargo test -- --ignored`"]
+    fn live_latest_release_is_readable_or_absent() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // `None` is a valid answer — every release of this repo may still be a
+        // draft, which the API does not expose. Either way it must not error.
+        if let Some(release) = rt.block_on(latest_release()).unwrap() {
+            assert!(version_parts(&release.version).is_some(), "tag {} is not a version", release.version);
+            assert!(release.url.starts_with("https://github.com/"), "unexpected url {}", release.url);
+        }
     }
 }

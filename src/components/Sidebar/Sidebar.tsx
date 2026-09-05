@@ -9,7 +9,9 @@ import { ContextMenu } from "../ContextMenu";
 import type { MenuItem } from "../ContextMenu";
 import { useToast } from "../Toast";
 import { useMenuAction } from "../../hooks/useMenuAction";
-import { useEscape, hasOverlay, isTypingTarget } from "../../lib/keyboard";
+import { hasOverlay, isTypingTarget } from "../../lib/keyboard";
+import { useI18n } from "../../lib/i18n";
+import { Modal } from "../Modal";
 import { missingNeeds } from "../../lib/needs";
 import { ExternalLink } from "../../lib/markdown";
 import { SCRIPTS_URL } from "../../lib/links";
@@ -124,6 +126,8 @@ interface SidebarProps {
   onOpenStore: () => void;
   /** Installed scripts with a newer version in the store — dots the button. */
   storeUpdates: number;
+  /** A newer PyShell is out — dots the Settings button, where the link is. */
+  updateAvailable: boolean;
   recentImports: string[];
   onRelink: (id: string) => void;
   onRemove: (id: string) => void;
@@ -141,7 +145,7 @@ interface SidebarProps {
   onToggleFavorite: (id: string) => void;
 }
 
-export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile, onImportPath, onOpenStore, storeUpdates, recentImports, onRelink, onRemove, onDuplicate, onExportPresets, onImportPresets, onRebuildEnv, onRefreshScript, runningScripts, loading, view, onOpenSettings, favorites, onToggleFavorite }: SidebarProps) {
+export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile, onImportPath, onOpenStore, storeUpdates, updateAvailable, recentImports, onRelink, onRemove, onDuplicate, onExportPresets, onImportPresets, onRebuildEnv, onRefreshScript, runningScripts, loading, view, onOpenSettings, favorites, onToggleFavorite }: SidebarProps) {
   const [relinking, setRelinking] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -153,8 +157,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const { notify, notifyError } = useToast();
-
-  useEscape(confirmDelete !== null, () => setConfirmDelete(null));
+  const { t } = useI18n();
 
   // ⌘F focuses the search input (Plan.md §1.4). The shortcut itself belongs to
   // Edit ▸ Find Script in the native menu — see src-tauri/src/menu.rs.
@@ -231,7 +234,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             ? "bg-accent text-white shadow-sm"
             : "text-fg hover:bg-fg/[0.06]"
         } ${!s.reachable ? "opacity-60" : ""}`}
-        title={!s.reachable ? "File is missing — click Find to relink" : s.name}
+        title={!s.reachable ? t("File is missing — click Find to relink") : s.name}
         onClick={() => onSelect(s.id)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -243,7 +246,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             class={`h-1.5 w-1.5 shrink-0 rounded-full ${
               s.id === selectedId ? "bg-white" : "bg-ok"
             } animate-pulse`}
-            title="Running"
+            title={t("Running")}
           />
         )}
         <ScriptIcon icon={s.icon} size={15} class="shrink-0" />
@@ -262,8 +265,8 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             }`}
             title={
               missingDeps > 0
-                ? `Depends on ${needs.length} script${needs.length === 1 ? "" : "s"} — ${missingDeps} not installed (select it for details)`
-                : `Depends on ${needs.length} script${needs.length === 1 ? "" : "s"} — all installed`
+                ? `${t("Depends on {n} scripts", { n: needs.length })} — ${t("{m} not installed (select it for details)", { m: missingDeps })}`
+                : `${t("Depends on {n} scripts", { n: needs.length })} — ${t("all installed")}`
             }
           >
             <LinkIcon size={11} />
@@ -276,7 +279,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             class={`shrink-0 text-2xs tabular-nums group-hover:hidden ${
               s.id === selectedId ? "text-white/70" : "text-subtle"
             }`}
-            title={`Select with ⌘${favIndex + 1}`}
+            title={t("Select with ⌘{n}", { n: favIndex + 1 })}
           >
             ⌘{favIndex + 1}
           </span>
@@ -296,10 +299,12 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
           }}
           title={
             favIndex >= 0
-              ? "Unpin from Favorites"
-              : `Pin to Favorites${s.id === selectedId ? " (⇧⌘F)" : ""}`
+              ? t("Unpin from Favorites")
+              : s.id === selectedId
+                ? t("Pin to Favorites (⇧⌘F)")
+                : t("Pin to Favorites")
           }
-          aria-label={favIndex >= 0 ? `Unpin ${s.name}` : `Pin ${s.name}`}
+          aria-label={favIndex >= 0 ? t("Unpin {name}", { name: s.name }) : t("Pin {name}", { name: s.name })}
           aria-pressed={favIndex >= 0}
         >
           <StarIcon size={12} filled={favIndex >= 0} />
@@ -313,9 +318,9 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             }`}
             onClick={(e) => handleRelink(e, s.id)}
             disabled={relinking === s.id}
-            title="Find file"
+            title={t("Find file")}
           >
-            {relinking === s.id ? "…" : "Find"}
+            {relinking === s.id ? "…" : t("Find")}
           </button>
         )}
         <button
@@ -328,8 +333,8 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             e.stopPropagation();
             setConfirmDelete(s.id);
           }}
-          title="Remove script"
-          aria-label={`Remove ${s.name}`}
+          title={t("Remove script")}
+          aria-label={t("Remove {name}", { name: s.name })}
         >
           <CloseIcon size={12} />
         </button>
@@ -340,56 +345,56 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
   /** Folder actions all resolve the path in Rust from the script list. */
   const folderActions = (script: ScriptEntry): MenuItem[] => [
     {
-      label: favorites.includes(script.id) ? "Unpin from Favorites" : "Pin to Favorites",
+      label: favorites.includes(script.id) ? t("Unpin from Favorites") : t("Pin to Favorites"),
       icon: <StarIcon filled={favorites.includes(script.id)} />,
       onSelect: () => onToggleFavorite(script.id),
     },
     {
-      label: "Refresh",
+      label: t("Refresh"),
       separated: true,
       icon: <RefreshIcon />,
       onSelect: () => onRefreshScript(script.id),
     },
     {
-      label: "Copy path",
+      label: t("Copy path"),
       icon: <FolderIcon />,
       onSelect: async () => {
         try {
           const dir = await ipc<string>("script_folder", { scriptId: script.id });
           await writeText(dir);
-          notify("info", `Copied ${dir}`);
+          notify("info", t("Copied {path}", { path: dir }));
         } catch (e) {
-          notifyError(e, "Copy path failed");
+          notifyError(e, t("Copy path failed"));
         }
       },
     },
     {
-      label: "Open in PyCharm",
+      label: t("Open in PyCharm"),
       icon: <EditorIcon />,
       onSelect: async () => {
         try {
           await ipc("open_in_pycharm", { scriptId: script.id });
         } catch (e) {
-          notifyError(e, "Open in PyCharm failed");
+          notifyError(e, t("Open in PyCharm failed"));
         }
       },
     },
     {
-      label: "Open in Terminal",
+      label: t("Open in Terminal"),
       icon: <TerminalIcon />,
       onSelect: async () => {
         try {
           await ipc("open_in_terminal", { scriptId: script.id });
         } catch (e) {
-          notifyError(e, "Open in Terminal failed");
+          notifyError(e, t("Open in Terminal failed"));
         }
       },
     },
-    { label: "Duplicate", separated: true, onSelect: () => onDuplicate(script.id) },
-    { label: "Export presets…", onSelect: () => onExportPresets(script.id) },
-    { label: "Import presets…", onSelect: () => onImportPresets(script.id) },
+    { label: t("Duplicate"), separated: true, onSelect: () => onDuplicate(script.id) },
+    { label: t("Export presets…"), onSelect: () => onExportPresets(script.id) },
+    { label: t("Import presets…"), onSelect: () => onImportPresets(script.id) },
     {
-      label: "Rebuild env",
+      label: t("Rebuild env"),
       icon: <RefreshIcon />,
       separated: true,
       onSelect: () => onRebuildEnv(script.id),
@@ -409,7 +414,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
         onRelink(scriptId);
       }
     } catch (err) {
-      notifyError(err, "Relink failed");
+      notifyError(err, t("Relink failed"));
     } finally {
       setRelinking(null);
     }
@@ -420,7 +425,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
       await ipc("remove_script", { scriptId, deleteEnv: true });
       onRemove(scriptId);
     } catch (err) {
-      notifyError(err, "Remove failed");
+      notifyError(err, t("Remove failed"));
     } finally {
       setConfirmDelete(null);
     }
@@ -434,31 +439,31 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
       {/* Titlebar band: the window is frameless (titleBarStyle: Overlay), so the
           traffic lights float over this corner and this strip has to be draggable. */}
       <div data-tauri-drag-region class="flex items-center gap-1 px-3 pb-2 pt-8">
-        <span class="panel-title min-w-0 flex-1 truncate">Scripts</span>
+        <span class="panel-title min-w-0 flex-1 truncate">{t("Scripts")}</span>
         <button
           class="btn btn-secondary"
           onClick={onImport}
-          title="Import a folder with pyshell.yaml"
+          title={t("Import a folder with pyshell.yaml")}
         >
-          + Folder
+          {t("+ Folder")}
         </button>
         <button
           class="btn btn-secondary"
           onClick={onImportFile}
-          title="Import a single .py file"
+          title={t("Import a single .py file")}
         >
-          + File
+          {t("+ File")}
         </button>
         <button
           class="btn btn-secondary relative"
           onClick={onOpenStore}
           title={
             storeUpdates > 0
-              ? `Script Store — ${storeUpdates} update${storeUpdates === 1 ? "" : "s"} available`
-              : "Download a script from the PyShell-scripts repo"
+              ? t("Script Store — {n} updates available", { n: storeUpdates })
+              : t("Download a script from the PyShell-scripts repo")
           }
         >
-          + Store
+          {t("+ Store")}
           {storeUpdates > 0 && (
             <span class="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-sidebar" />
           )}
@@ -467,7 +472,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
           <button
             class="btn btn-secondary px-2"
             onClick={(e) => setRecentMenu({ x: e.currentTarget.getBoundingClientRect().right, y: e.currentTarget.getBoundingClientRect().bottom + 4 })}
-            title="Recently imported paths"
+            title={t("Recently imported paths")}
           >
             <ClockIcon size={13} />
           </button>
@@ -482,7 +487,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             ref={searchRef}
             type="text"
             class="form-input w-full pl-7 pr-7 py-1 text-[13px]"
-            placeholder="Search…"
+            placeholder={t("Search…")}
             value={search}
             onInput={(e) => setSearch(e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -495,7 +500,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
             <button
               class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-fg"
               onClick={() => { setSearch(""); searchRef.current?.focus(); }}
-              title="Clear search"
+              title={t("Clear search")}
             >
               <CloseIcon size={12} />
             </button>
@@ -506,37 +511,37 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
         <button
           class={`btn ${sortAlpha ? "btn-primary" : "btn-secondary"} shrink-0 self-stretch px-1.5`}
           onClick={() => setSortAlpha((v) => !v)}
-          title={sortAlpha ? "Sorted A→Z — click for import order" : "Sort A→Z"}
+          title={sortAlpha ? t("Sorted A→Z — click for import order") : t("Sort A→Z")}
           aria-pressed={sortAlpha}
-          aria-label="Sort scripts alphabetically"
+          aria-label={t("Sort scripts alphabetically")}
         >
           <SortIcon size={13} />
         </button>
       </div>
 
       <div ref={listRef} class="flex-1 overflow-y-auto px-2 pb-2">
-        {loading && <div class="p-2 text-2xs text-subtle">Loading…</div>}
+        {loading && <div class="p-2 text-2xs text-subtle">{t("Loading…")}</div>}
         {!loading && scripts.length === 0 && (
           <div class="mx-1 mt-1 rounded-lg border border-dashed border-line p-3 text-2xs leading-relaxed text-subtle">
-            No scripts yet. Use <span class="font-medium text-muted">+ Folder</span> for a project
-            with a <span class="font-mono">pyshell.yaml</span>, or{" "}
-            <span class="font-medium text-muted">+ File</span> for a single script.
+            {t("No scripts yet. Use")} <span class="font-medium text-muted">+ Folder</span>{" "}
+            {t("for a project with a")} <span class="font-mono">pyshell.yaml</span>, {t("or")}{" "}
+            <span class="font-medium text-muted">+ File</span> {t("for a single script.")}
             <div class="mt-2 border-t border-line pt-2">
-              Need something to run?{" "}
+              {t("Need something to run?")}{" "}
               <button
                 class="font-medium text-accent hover:underline"
                 onClick={onOpenStore}
               >
-                Browse the Store
+                {t("Browse the Store")}
               </button>{" "}
-              — ready-made scripts from{" "}
+              {t("— ready-made scripts from")}{" "}
               <ExternalLink href={SCRIPTS_URL}>PyShell-scripts</ExternalLink>
               .
             </div>
           </div>
         )}
         {!loading && scripts.length > 0 && filtered.length === 0 && (
-          <div class="p-2 text-2xs text-subtle">No scripts match "{search}".</div>
+          <div class="p-2 text-2xs text-subtle">{t("No scripts match \"{q}\".", { q: search })}</div>
         )}
 
         {sections.map((section) => {
@@ -556,7 +561,7 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
                   class={`transition-transform ${isCollapsed ? "" : "rotate-90"}`}
                 />
                 {section.key === FAVORITES && <StarIcon size={10} filled class="text-warn" />}
-                <span class="truncate">{section.label}</span>
+                <span class="truncate">{t(section.label)}</span>
                 <span class="ml-auto text-subtle/60">{section.items.length}</span>
               </button>
               {!isCollapsed && section.items.map((s) => renderScriptRow(s))}
@@ -570,20 +575,23 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
           {runningScripts.length > 0 && (
             <span
               class="flex items-center gap-1.5 rounded-full bg-ok/12 px-2 py-0.5 text-2xs font-medium text-ok"
-              title={`${runningScripts.length} run${runningScripts.length === 1 ? "" : "s"} in progress`}
+              title={t("{n} runs in progress", { n: runningScripts.length })}
             >
               <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
-              {runningScripts.length} running
+              {t("{n} running", { n: runningScripts.length })}
             </span>
           )}
           <span class="flex-1" />
           <button
-            class={`btn ${view === "settings" ? "btn-primary" : "btn-secondary"} px-2`}
+            class={`btn ${view === "settings" ? "btn-primary" : "btn-secondary"} relative px-2`}
             onClick={onOpenSettings}
-            title="Settings (⌘,)"
+            title={updateAvailable ? t("Settings (⌘,) — a PyShell update is available") : t("Settings (⌘,)")}
             aria-pressed={view === "settings"}
           >
             <GearIcon size={14} />
+            {updateAvailable && (
+              <span class="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-sidebar" />
+            )}
           </button>
         </div>
       </div>
@@ -613,26 +621,25 @@ export function Sidebar({ scripts, selectedId, onSelect, onImport, onImportFile,
       )}
 
       {confirmDelete && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
-          <div
-            class="max-w-sm rounded-xl border border-line bg-raised p-5 shadow-panel"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 class="mb-1.5 text-[15px] font-semibold">Remove script?</h2>
-            <p class="mb-4 text-[13px] leading-relaxed text-muted">
-              This removes the script from PyShell and deletes its virtual environment. The script
-              file on disk is not touched.
-            </p>
-            <div class="flex justify-end gap-2">
-              <button class="btn btn-secondary" autoFocus onClick={() => setConfirmDelete(null)}>
-                Cancel
-              </button>
-              <button class="btn btn-danger" onClick={() => handleRemove(confirmDelete)}>
-                Remove
-              </button>
-            </div>
+        <Modal
+          onClose={() => setConfirmDelete(null)}
+          title={t("Remove script?")}
+          panelClass="max-w-sm"
+          dismissable={false}
+        >
+          <h2 class="mb-1.5 text-[15px] font-semibold">{t("Remove script?")}</h2>
+          <p class="mb-4 text-[13px] leading-relaxed text-muted">
+            {t("This removes the script from PyShell and deletes its virtual environment, presets, history and stored secrets. The script file on disk is not touched.")}
+          </p>
+          <div class="flex justify-end gap-2">
+            <button class="btn btn-secondary" autoFocus onClick={() => setConfirmDelete(null)}>
+              {t("Cancel")}
+            </button>
+            <button class="btn btn-danger" onClick={() => handleRemove(confirmDelete)}>
+              {t("Remove")}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

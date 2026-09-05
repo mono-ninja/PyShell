@@ -90,8 +90,16 @@ outputs:
 | \`runtime\` | yes | How to run it |
 | \`inputs\` | yes | Form fields; may be an empty list |
 | \`id\` | no | Unique id; derived from the path when absent |
+| \`version\` | no | Script version (any string), shown as \`v<version>\` |
 | \`description\`, \`icon\`, \`category\` | no | Presentation |
 | \`outputs\` | no | Artifacts and result kind |
+
+**Publishing to the Store? Raise \`version\`.** PyShell detects an available
+update by comparing the repo manifest's \`version\` with the installed
+script's. A code change without a raised \`version\` stays invisible forever —
+the user sees "Installed" with no Update button. The rule is simple: anything
+changed in the script's folder — raise \`version\` in \`pyshell.yaml\` in the
+same commit.
 
 \`icon\` accepts either a bare emoji (\`icon: 🔧\`) or a vector icon by name,
 \`icon: lucide:<name>\`, where \`<name>\` is one of the identifiers below (a

@@ -1,27 +1,28 @@
 import type { Theme } from "../hooks/useTheme";
+import { useI18n } from "../lib/i18n";
 
 interface ThemeToggleProps {
   theme: Theme;
   onChange: (t: Theme) => void;
 }
 
-const OPTIONS: { value: Theme; label: string; icon: string }[] = [
-  { value: "light", label: "Light", icon: "☀" },
-  { value: "dark", label: "Dark", icon: "☾" },
-  { value: "system", label: "Match system", icon: "◐" },
-];
-
 /** Segmented light / dark / system control. */
 export function ThemeToggle({ theme, onChange }: ThemeToggleProps) {
+  const { t } = useI18n();
+  const options: { value: Theme; label: string; icon: string }[] = [
+    { value: "light", label: t("Light"), icon: "☀" },
+    { value: "dark", label: t("Dark"), icon: "☾" },
+    { value: "system", label: t("Match system"), icon: "◐" },
+  ];
   return (
     <div class="flex items-center gap-2">
-      <span class="panel-title flex-1">Theme</span>
+      <span class="panel-title flex-1">{t("Theme")}</span>
       <div
         class="flex items-center gap-0.5 rounded-md bg-fg/[0.06] p-0.5"
         role="radiogroup"
-        aria-label="Colour theme"
+        aria-label={t("Colour theme")}
       >
-        {OPTIONS.map((opt) => {
+        {options.map((opt) => {
           const active = theme === opt.value;
           return (
             <button

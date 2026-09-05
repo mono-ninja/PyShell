@@ -20,7 +20,6 @@
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
     "fs:default",
-    "fs:allow-read-text-file",
     "fs:allow-write-text-file",
     {
       "identifier": "fs:allow-copy-file",

@@ -8,6 +8,7 @@ import { ChoiceField, MultiChoiceField } from "./fields/ChoiceField";
 import { FileField, FilesField, DirField, SavePathField } from "./fields/FileField";
 import { SecretField } from "./fields/SecretField";
 import { ChevronIcon } from "../icons";
+import { useI18n } from "../../lib/i18n";
 
 interface FormRendererProps {
   inputs: InputSpec[];
@@ -102,6 +103,7 @@ function FormField({
   onChange: (v: unknown) => void;
   scriptId: string;
 }) {
+  const { t } = useI18n();
   const id = `field-${input.key}`;
   const error = validateField(input, value);
   const invalid = error ? "is-invalid" : "";
@@ -151,7 +153,7 @@ function FormField({
       case "secret":
         return <SecretField id={id} scriptId={scriptId} fieldKey={input.key} onChange={onChange} />;
       default:
-        return <span class="field-help">Unknown field type</span>;
+        return <span class="field-help">{t("Unknown field type")}</span>;
     }
   };
 

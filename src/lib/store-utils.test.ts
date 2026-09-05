@@ -90,6 +90,16 @@ describe("hasUpdate", () => {
     // Repo dropped a version the installed copy still has.
     expect(hasUpdate(entry({ version: null, installed_version: "1" }))).toBe(true);
   });
+
+  it("reads an *absent* installed_version as an update — the shape a stale row has", () => {
+    // `skip_serializing_if` makes the field absent over IPC, not null, so a row
+    // fetched while the script was still uninstalled carries `undefined`. This
+    // is correct here and is exactly why StoreDialog re-reads the catalog after
+    // an install: left stale, the row would offer an Update for the files it
+    // had just downloaded. Fix the staleness, never this comparison.
+    const stale: RepoScript = { ...entry({ version: "1" }), installed_version: undefined };
+    expect(hasUpdate(stale)).toBe(true);
+  });
 });
 
 describe("countUpdates", () => {

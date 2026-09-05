@@ -153,6 +153,15 @@ is lost), while presets, history and secrets — keyed by
 script id — carry over. The environment flips to *Stale* and rebuilds if the
 dependencies changed. Updates are blocked while the script is running.
 
+Installed rows also carry **Repair** (re-download the folder over the existing
+files, without any version comparison — for installs that went bad) and
+**Uninstall** (the sidebar's Remove, without leaving the dialog: removes the
+script, its environment, presets, history and secrets; the folder itself stays
+on disk). Both confirm before acting.
+
+The interface ships in English and Ukrainian — Settings ▸ Appearance switches
+the language (the choice persists; the system locale is the default).
+
 The catalog is checked against GitHub when the app starts and at most once
 every five minutes after that (a check costs 2 of the 60 unauthenticated API
 requests per hour); **Refresh** always re-checks immediately. File downloads
@@ -196,7 +205,7 @@ Fill in the form and press **Run**. Output streams live:
 
 - **Output** — stdout/stderr with filtering, search and autoscroll
 - **Results** — structured events (progress, table, chart, markdown) and artifacts
-- **History** — recent runs with a **Retry** button
+- **History** — recent runs with Retry, run comparison, and CSV/JSON export
 
 **Run** stays disabled while the form is invalid (required, min/max, pattern).
 
@@ -205,6 +214,9 @@ Fill in the form and press **Run**. Output streams live:
 A `secret` field is stored in the macOS Keychain / Windows Credential Manager.
 The value never returns to the frontend and is never written to state. It is
 passed to the process through an environment variable, never through argv.
+Settings ▸ Secrets lists every stored secret across all scripts (script, key,
+date) with a per-entry delete; removing a script deletes its secrets along
+with it.
 
 ### 5. Presets
 
@@ -460,11 +472,15 @@ the dependencies into an isolated venv itself — just press *Prepare Env*.
 | Run output | `~/Library/Application Support/com.pyshell.app/output/` |
 | State (values, presets, history) | `~/Library/Application Support/com.pyshell.app/state/` |
 | Logs | `~/Library/Application Support/com.pyshell.app/logs/` |
+| Settings (language, retention) | `~/Library/Application Support/com.pyshell.app/settings.json` |
 | Secrets | macOS Keychain / Windows Credential Manager |
+| Secret index (names only, never values) | `~/Library/Application Support/com.pyshell.app/secrets.json` |
 | Bookmarks | `~/Library/Application Support/com.pyshell.app/bookmarks/` |
 
 Run artifacts go to `PYSHELL_OUTPUT_DIR` (passed to the script as an environment
-variable), not next to the script. The last 20 runs per script are kept.
+variable), not next to the script. The last 50 runs per script are kept
+(configurable in Settings ▸ History & limits, which governs the History list
+and the run folders with one number).
 
 ## Security
 

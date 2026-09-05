@@ -273,6 +273,15 @@ export function LinkIcon(props: IconProps) {
   );
 }
 
+/** Wrench — Store Repair (re-download over a broken install). */
+export function WrenchIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M11.25 2.75a3.25 3.25 0 0 0-2.9 4.7L2.75 13.05l1.2 1.2 5.6-5.6a3.25 3.25 0 0 0 4.7-2.9l-2.1 1.25-1.9-.5-.5-1.9Z" />
+    </Svg>
+  );
+}
+
 /**
  * Pin marker for Favorites. `filled` is the pinned state — outline alone reads
  * as "not pinned yet" on a hover-revealed button, which is what the sidebar

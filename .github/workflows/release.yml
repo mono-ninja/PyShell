@@ -32,18 +32,24 @@ jobs:
           # them — Tauri does not merge external binaries itself, it just looks
           # for `binaries/uv-universal-apple-darwin`.
           #
-          # Windows x86_64-pc-windows-msvc was here and was removed after the
-          # v0.3.0 tag build failed on the Windows runner (exit 1; cause not
-          # diagnosed from the logs available). Re-add it by restoring the
-          # include below once the failure is understood:
-          #   - platform: windows-latest
-          #     target: x86_64-pc-windows-msvc
-          #     rust-targets: x86_64-pc-windows-msvc
-          #     uv-triples: x86_64-pc-windows-msvc
+          # Windows x86_64-pc-windows-msvc: restored 2026-09-05. The original
+          # removal was a `cargo test` binary dying at load with
+          # 0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND — `rfd`'s TaskDialogIndirect
+          # needs ComCtl32 v6, which a test binary only gets when a manifest
+          # requests it; `build.rs` now embeds that via `cargo:rustc-link-arg-tests`
+          # (test targets only, MSVC only — see AGENTS.md, Build). NOT yet
+          # verified on a real Windows machine: run this workflow via
+          # `workflow_dispatch` (it builds without publishing) and watch the
+          # "Generate bindings + run Rust tests" step. If it passes, also
+          # re-add the `windows-compile` job to ci.yml.
           - platform: macos-latest
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             uv-triples: universal-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            uv-triples: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write

@@ -10,6 +10,7 @@ import { ChartView } from "../ChartView/ChartView";
 import type { Artifact } from "../../types/schema";
 import type { StructuredState } from "../../hooks/useJobs";
 
+import { useI18n } from "../../lib/i18n";
 interface ResultViewProps {
   jobId: string | null;
   structured: StructuredState;
@@ -26,9 +27,10 @@ interface ResultViewProps {
  */
 export function ResultView({ jobId, structured, artifacts, declaredResult }: ResultViewProps) {
   const { notifyError } = useToast();
+  const { t } = useI18n();
   const handleShowInFinder = useCallback((path: string) => {
-    revealItemInDir(path).catch((e) => notifyError(e, "Reveal failed"));
-  }, [notifyError]);
+    revealItemInDir(path).catch((e) => notifyError(e, t("Reveal failed")));
+  }, [notifyError, t]);
 
   // Binary copyFile — handles both text and binary artifacts (audit M14)
   const handleSaveAs = useCallback(async (path: string) => {
@@ -39,9 +41,9 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
         await copyFile(path, dest);
       }
     } catch (e) {
-      notifyError(e, "Save as failed");
+      notifyError(e, t("Save as failed"));
     }
-  }, [notifyError]);
+  }, [notifyError, t]);
 
   const table = structured.table;
   const markdown = structured.markdown;
@@ -80,21 +82,21 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
     // The declared kind only changes the wording — a script may emit anything
     // regardless of what its manifest says, so nothing here gates rendering.
     const hint = declaredResult === "markdown"
-      ? <>This script declares a markdown result. Run it to see the output.</>
+      ? <>{t("This script declares a markdown result. Run it to see the output.")}</>
       : declaredResult === "table"
-        ? <>This script declares a table result. Run it to see the output.</>
+        ? <>{t("This script declares a table result. Run it to see the output.")}</>
         : (
           <>
-            Tables, charts, markdown and files a script produces show up here. See{" "}
+            {t("Tables, charts, markdown and files a script produces show up here. See")}{" "}
             <ExternalLink href={SCRIPTS_URL}>
               PyShell-scripts
             </ExternalLink>{" "}
-            for examples of how to emit them.
+            {t("for examples of how to emit them.")}
           </>
         );
     return (
       <div class="flex flex-1 flex-col items-center justify-center gap-1.5 px-8 text-center">
-        <p class="text-[13px] text-muted">No results yet</p>
+        <p class="text-[13px] text-muted">{t("No results yet")}</p>
         <p class="max-w-sm text-2xs leading-relaxed text-subtle">
           {hint}
         </p>
@@ -111,8 +113,8 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
             <input
               type="text"
               class="form-input w-full py-1 pl-7 pr-7 text-xs"
-              aria-label="Search results"
-              placeholder="Search table and files…"
+              aria-label={t("Search results")}
+              placeholder={t("Search table and files…")}
               value={search}
               onInput={(e) => setSearch(e.currentTarget.value)}
               onKeyDown={(e) => { if (e.key === "Escape") setSearch(""); }}
@@ -121,7 +123,7 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
               <button
                 class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-fg"
                 onClick={() => setSearch("")}
-                title="Clear search"
+                title={t("Clear search")}
               >
                 <CloseIcon size={12} />
               </button>
@@ -138,7 +140,7 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
       {markdown && (
         <section class="space-y-1.5">
           <div class="flex items-baseline gap-2">
-            <span class="panel-title">Result</span>
+            <span class="panel-title">{t("Result")}</span>
           </div>
           <div class="max-w-3xl text-[13px] text-fg">
             {renderMarkdown(markdown)}
@@ -148,7 +150,7 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
       {chart && chart.series.length > 0 && (
         <section class="space-y-1.5">
           <div class="flex items-baseline gap-2">
-            <span class="panel-title">Chart</span>
+            <span class="panel-title">{t("Chart")}</span>
             <span class="text-2xs text-subtle">{chart.chartType}</span>
           </div>
           <div class="rounded-lg border border-line bg-surface px-3 py-2">
@@ -159,11 +161,11 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
       {table && (
         <section class="space-y-1.5">
           <div class="flex items-baseline gap-2">
-            <span class="panel-title">Table</span>
+            <span class="panel-title">{t("Table")}</span>
             <span class="text-2xs text-subtle">
               {search.trim() && filteredRows.length !== table.rows.length
-                ? `${filteredRows.length} / ${table.rows.length} rows`
-                : `${table.rows.length} ${table.rows.length === 1 ? "row" : "rows"}`}
+                ? `${filteredRows.length} / ${table.rows.length} ${t("rows")}`
+                : t("{n} rows", { n: table.rows.length })}
             </span>
           </div>
           {filteredRows.length > 0 ? (
@@ -196,7 +198,7 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
             </div>
           ) : (
             <p class="rounded-lg border border-line bg-surface px-3 py-2 text-2xs text-subtle">
-              No rows match "{search}".
+              {t("No rows match \"{q}\".", { q: search })}
             </p>
           )}
         </section>
@@ -205,7 +207,7 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
       {filteredArtifacts.length > 0 && (
         <section class="space-y-1.5">
           <div class="flex items-baseline gap-2">
-            <span class="panel-title">Artifacts</span>
+            <span class="panel-title">{t("Artifacts")}</span>
             <span class="text-2xs text-subtle">
               {search.trim() && filteredArtifacts.length !== artifacts.length
                 ? `${filteredArtifacts.length} / ${artifacts.length}`
@@ -230,14 +232,14 @@ export function ResultView({ jobId, structured, artifacts, declaredResult }: Res
                   class="btn btn-ghost py-1"
                   onClick={() => handleShowInFinder(a.path)}
                 >
-                  Show
+                  {t("Show")}
                 </button>
                 <button
                   type="button"
                   class="btn btn-secondary py-1"
                   onClick={() => handleSaveAs(a.path)}
                 >
-                  Save
+                  {t("Save")}
                 </button>
               </div>
             ))}

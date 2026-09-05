@@ -1,5 +1,6 @@
 import type { ChoiceOption } from "../../../types/schema";
 
+import { useI18n } from "../../../lib/i18n";
 interface ChoiceFieldProps {
   id: string;
   value: string | null;
@@ -35,6 +36,7 @@ interface MultiChoiceFieldProps {
 }
 
 export function MultiChoiceField({ value, options, onChange }: MultiChoiceFieldProps) {
+  const { t } = useI18n();
   const arr = value ?? [];
   const allSelected = arr.length === options.length && options.length > 0;
 
@@ -42,14 +44,14 @@ export function MultiChoiceField({ value, options, onChange }: MultiChoiceFieldP
     <div class="rounded-md border border-line bg-raised">
       <div class="flex items-center justify-between border-b border-line px-2.5 py-1.5">
         <span class="text-2xs text-subtle">
-          {arr.length} of {options.length} selected
+          {t("{n} of {m} selected", { n: arr.length, m: options.length })}
         </span>
         <button
           type="button"
           class="text-2xs font-medium text-accent hover:underline"
           onClick={() => onChange(allSelected ? [] : options.map((o) => o.value))}
         >
-          {allSelected ? "Clear all" : "Select all"}
+          {allSelected ? t("Clear all") : t("Select all")}
         </button>
       </div>
       <div class="flex max-h-40 flex-col overflow-y-auto p-1">

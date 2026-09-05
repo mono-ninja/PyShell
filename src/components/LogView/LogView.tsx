@@ -7,6 +7,7 @@ import { useToast } from "../Toast";
 import { WrapIcon } from "../icons";
 import { parseAnsi, stripAnsi, colorToCss, type AnsiSegment } from "../../lib/ansi";
 
+import { useI18n } from "../../lib/i18n";
 interface LogViewProps {
   lines: LogLine[];
   autoScroll: boolean;
@@ -102,6 +103,7 @@ export function LogView({ lines, autoScroll, logFilePath }: LogViewProps) {
   const [wrap, setWrap] = useState(false);
   const [charWidth, setCharWidth] = useState(7.2);
   const { notifyError } = useToast();
+  const { t } = useI18n();
 
   // Measure the monospace advance width once; used to estimate wrapped row
   // counts for variable-height virtualization.
@@ -240,7 +242,7 @@ export function LogView({ lines, autoScroll, logFilePath }: LogViewProps) {
         await copyFile(logFilePath, dest);
       }
     } catch (e) {
-      notifyError(e, "Export failed");
+      notifyError(e, t("Export failed"));
     }
   }, [logFilePath, notifyError]);
 
@@ -248,8 +250,8 @@ export function LogView({ lines, autoScroll, logFilePath }: LogViewProps) {
     return (
       <div class="flex flex-1 flex-col items-center justify-center gap-1.5 text-center">
         <span class="font-mono text-xl text-subtle opacity-50">{"{ }"}</span>
-        <p class="text-[13px] text-muted">No output yet</p>
-        <p class="text-2xs text-subtle">Press Run — stdout and stderr stream in live.</p>
+        <p class="text-[13px] text-muted">{t("No output yet")}</p>
+        <p class="text-2xs text-subtle">{t("Press Run — stdout and stderr stream in live.")}</p>
       </div>
     );
   }
@@ -260,19 +262,19 @@ export function LogView({ lines, autoScroll, logFilePath }: LogViewProps) {
       <div class="flex shrink-0 items-center gap-2 border-b border-line px-5 py-2">
         <select
           class="form-input w-auto py-1 text-xs"
-          aria-label="Filter by stream"
+          aria-label={t("Filter by stream")}
           value={filter}
           onChange={(e) => setFilter(e.currentTarget.value as StreamFilter)}
         >
-          <option value="all">All ({lines.length})</option>
+          <option value="all">{t("All")} ({lines.length})</option>
           <option value="stdout">stdout ({streamCounts.stdout})</option>
           <option value="stderr">stderr ({streamCounts.stderr})</option>
         </select>
         <input
           type="text"
           class="form-input flex-1 py-1 text-xs"
-          aria-label="Search log output"
-          placeholder="Search output…"
+          aria-label={t("Search log output")}
+          placeholder={t("Search output…")}
           value={search}
           onInput={(e) => setSearch(e.currentTarget.value)}
         />
@@ -285,18 +287,18 @@ export function LogView({ lines, autoScroll, logFilePath }: LogViewProps) {
           type="button"
           class={`btn py-1 ${wrap ? "btn-primary" : "btn-secondary"}`}
           onClick={() => setWrap((w) => !w)}
-          title={wrap ? "Wrapping long lines — click to truncate" : "Truncating long lines — click to wrap"}
+          title={wrap ? t("Wrapping long lines — click to truncate") : t("Truncating long lines — click to wrap")}
           aria-pressed={wrap}
         >
           <WrapIcon size={13} />
-          Wrap
+          {t("Wrap")}
         </button>
         <button type="button" class="btn btn-secondary py-1" onClick={handleCopy}>
-          Copy
+          {t("Copy")}
         </button>
         {logFilePath && (
           <button type="button" class="btn btn-secondary py-1" onClick={handleExport}>
-            Export
+            {t("Export")}
           </button>
         )}
       </div>

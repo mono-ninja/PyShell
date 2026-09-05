@@ -14,10 +14,17 @@ import { useJobs } from "./hooks/useJobs";
 import { useTheme } from "./hooks/useTheme";
 import type { JobState, StructuredState } from "./hooks/useJobs";
 import { useToast } from "./components/Toast";
-import { ContextMenu } from "./components/ContextMenu";
-
-const EMPTY_STRUCTURED: StructuredState = { progress: null, table: null, status: null, markdown: null, chart: null };
-import type { ScriptSchema, EnvStatus, ScriptState, HistoryEntry, Preset, ScriptDoc, ScriptEntry } from "./types/schema";
+import { useSelectedScript } from "./hooks/useSelectedScript";
+import type {
+  ScriptSchema,
+  EnvStatus,
+  ScriptState,
+  HistoryEntry,
+  Preset,
+  ScriptEntry,
+  ScriptSource,
+  EnvProgress,
+} from "./types/schema";
 import { ReadmePanel } from "./components/ReadmePanel";
 import { Tabs } from "./components/Tabs";
 import type { TabDef } from "./components/Tabs";
@@ -26,19 +33,26 @@ import { useArtifacts } from "./hooks/useArtifacts";
 import { useFavorites } from "./hooks/useFavorites";
 import { useMenuAction } from "./hooks/useMenuAction";
 import { useStoreUpdates } from "./hooks/useStoreUpdates";
+import { useAppUpdate } from "./hooks/useAppUpdate";
 import { missingNeeds } from "./lib/needs";
 import { ScriptingGuide } from "./components/ScriptingGuide";
 import { StoreDialog } from "./components/StoreDialog";
-import { useEscape } from "./lib/keyboard";
-import { BookIcon, CheckIcon, CloseIcon, PlayIcon, SearchIcon, StopIcon, TrashIcon } from "./components/icons";
+import { useEscape, hasOverlay } from "./lib/keyboard";
+import { useI18n } from "./lib/i18n";
+import { BookIcon, PlayIcon, StopIcon } from "./components/icons";
 import { ScriptIcon } from "./lib/script-icon";
 import { Settings } from "./components/Settings/Settings";
+import { HistoryPanel } from "./components/HistoryPanel";
+import { PresetsBar } from "./components/PresetsBar";
+import {
+  CancelConfirmDialog,
+  CodeDialog,
+  ConsentDialog,
+  DepsConfirmDialog,
+  OnboardingDialog,
+} from "./components/dialogs";
 
-interface EnvProgress {
-  phase: string;
-  pct: number;
-  message: string;
-}
+const EMPTY_STRUCTURED: StructuredState = { progress: null, table: null, status: null, markdown: null, chart: null };
 
 const ONBOARDING_KEY = "pyshell:onboarded";
 const RECENT_KEY = "pyshell:recent-imports";
@@ -58,50 +72,60 @@ function saveRecentImport(path: string) {
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, 5)));
   } catch { /* ignore */ }
 }
+
 type PaneId = "params" | "output" | "results" | "history";
 type View = "script" | "settings";
 
-/** Lowercased haystack for history search: visible columns plus the run's
- *  input values, so "find the run where I set target=x" works. */
-function historyHaystack(entry: HistoryEntry): string {
-  return [
-    new Date(entry.timestamp).toLocaleString(),
-    entry.exit_code === 0 ? "succeeded" : "failed",
-    `exit ${entry.exit_code ?? "—"}`,
-    `${(entry.duration_ms / 1000).toFixed(1)}s`,
-    JSON.stringify(entry.values),
-  ].join("\n").toLowerCase();
+/** Defaults of every schema input that declares one (audit M15's merge base). */
+function defaultsOf(schema: ScriptSchema): Record<string, unknown> {
+  const defaults: Record<string, unknown> = {};
+  for (const input of schema.inputs) {
+    if (input.default !== undefined && input.default !== null) {
+      defaults[input.key] = input.default;
+    }
+  }
+  return defaults;
 }
 
 export function App() {
   const { theme, setTheme } = useTheme();
+  const { t } = useI18n();
   const { notify, notifyError } = useToast();
   const { scripts, loading, refresh } = useScripts();
   const { favorites, toggleFavorite } = useFavorites(scripts, notifyError);
   const { jobs, run, cancel, clearJob, runningScripts } = useJobs();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [schema, setSchema] = useState<ScriptSchema | null>(null);
-  const [envStatus, setEnvStatus] = useState<EnvStatus | null>(null);
-  const [values, setValues] = useState<Record<string, unknown>>({});
+
+  // The selected script and everything loaded for it (race-safe — see the hook).
+  const {
+    selectedId,
+    selectedIdRef,
+    schema,
+    setSchema,
+    envStatus,
+    setEnvStatus,
+    values,
+    setValues,
+    scriptState,
+    setScriptState,
+    readme,
+    selectScript: loadScript,
+    clearIfSelected,
+    selectReadmeLang,
+  } = useSelectedScript(notifyError);
+
   const [autoScroll, setAutoScroll] = useState(true);
   const [envProgress, setEnvProgress] = useState<EnvProgress | null>(null);
   const [showConsent, setShowConsent] = useState(false);
   const [introspecting, setIntrospecting] = useState(false);
   const [preparing, setPreparing] = useState(false);
-  const [scriptState, setScriptState] = useState<ScriptState | null>(null);
   const [showDepsConfirm, setShowDepsConfirm] = useState(false);
   const [depsList, setDepsList] = useState<string[]>([]);
-  const [presetName, setPresetName] = useState("");
   const [activePreset, setActivePreset] = useState<string | null>(null);
-  const [presetMenu, setPresetMenu] = useState<{ x: number; y: number; preset: Preset } | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [scriptCode, setScriptCode] = useState<string | null>(null);
+  const [scriptCode, setScriptCode] = useState<ScriptSource | null>(null);
   const [showCode, setShowCode] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showStore, setShowStore] = useState(false);
-  const [readme, setReadme] = useState<ScriptDoc | null>(null);
   const [pane, setPane] = useState<PaneId>("params");
   // Content that landed while its tab was hidden, so the tab can say so.
   const [unseen, setUnseen] = useState<Set<PaneId>>(new Set());
@@ -110,12 +134,11 @@ export function App() {
   const [showCmdPreview, setShowCmdPreview] = useState(false);
   const [cmdPreview, setCmdPreview] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const [compareBase, setCompareBase] = useState<number | null>(null);
-  const [compareDiff, setCompareDiff] = useState<{ base: HistoryEntry; target: HistoryEntry } | null>(null);
-  const [historySearch, setHistorySearch] = useState("");
+  const [showJobsPanel, setShowJobsPanel] = useState(false);
   const [recentImports, setRecentImports] = useState<string[]>(loadRecentImports);
   // Dot on "+ Store": installed scripts with a newer version in the catalog.
   const storeUpdates = useStoreUpdates(scripts, showStore);
+  const appUpdate = useAppUpdate();
 
   useEffect(() => {
     if (!localStorage.getItem(ONBOARDING_KEY)) {
@@ -127,13 +150,6 @@ export function App() {
     localStorage.setItem(ONBOARDING_KEY, "1");
     setShowOnboarding(false);
   }, []);
-
-  // Ref to avoid race conditions when switching scripts (audit #8, H7)
-  const selectedIdRef = useRef(selectedId);
-  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
-
-  // Token ref to prevent stale async setState in selectScript (audit H7)
-  const selectTokenRef = useRef(0);
 
   // Listen for manifest changes (Plan.md §M3: watcher → scripts:changed)
   useEffect(() => {
@@ -151,7 +167,7 @@ export function App() {
             refresh();
           })
           .catch((e) => {
-            notifyError(e, "Manifest reload failed");
+            notifyError(e, t("Manifest reload failed"));
           });
         // Re-check env status: a requirements.txt or pyshell.yaml edit may
         // have changed the env_key, flipping the pill from Ready to Stale.
@@ -160,16 +176,17 @@ export function App() {
             if (selectedIdRef.current === id) setEnvStatus(status);
           })
           .catch((e) => {
-            notifyError(e, "Env status check failed");
+            notifyError(e, t("Env status check failed"));
           });
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [refresh, notifyError]);
+  }, [refresh, notifyError, selectedIdRef, setSchema, setEnvStatus, t]);
 
-  // Listen for env progress events (Plan.md §M2: env:{id}:progress)
+  // Listen for env progress events (Plan.md §M2: env:{id}:progress). The
+  // payload type is the ts-rs-generated binding — no hand-written interface.
   useEffect(() => {
     if (!selectedId) return;
     const id = selectedId;
@@ -184,7 +201,7 @@ export function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [selectedId]);
+  }, [selectedId, selectedIdRef]);
 
   const formValid = useMemo(
     () => (schema ? isFormValid(schema.inputs, values) : false),
@@ -205,15 +222,9 @@ export function App() {
 
   const handleResetDefaults = useCallback(() => {
     if (!schema) return;
-    const defaults: Record<string, unknown> = {};
-    for (const input of schema.inputs) {
-      if (input.default !== undefined && input.default !== null) {
-        defaults[input.key] = input.default;
-      }
-    }
-    setValues(defaults);
+    setValues(defaultsOf(schema));
     setActivePreset(null);
-  }, [schema]);
+  }, [schema, setValues]);
 
   const jumpToFirstError = useCallback(() => {
     if (!schema) return;
@@ -238,73 +249,21 @@ export function App() {
       setCmdPreview(preview.command);
       setShowCmdPreview(true);
     } catch (e) {
-      notifyError(e, "Command preview failed");
+      notifyError(e, t("Command preview failed"));
     }
-  }, [selectedId, values, notifyError]);
+  }, [selectedId, values, notifyError, t]);
 
-  const selectScript = useCallback(async (id: string) => {
-    const token = ++selectTokenRef.current;
+  // Selecting a script resets the pane-level UI, then the hook loads schema,
+  // env, state and docs (with race protection — see useSelectedScript).
+  const selectScript = useCallback((id: string) => {
     setView("script");
-    setSelectedId(id);
-    setSchema(null);
-    setEnvStatus(null);
-    setValues({});
-    setScriptState(null);
-    setEnvProgress(null);
-    setReadme(null);
+    setActivePreset(null);
     setShowReadme(false);
+    setEnvProgress(null);
     setPane("params");
     setUnseen(new Set());
-    setActivePreset(null);
-    try {
-      const s = await ipc<ScriptSchema>("get_schema", { scriptId: id });
-      if (selectTokenRef.current !== token) return; // stale
-      setSchema(s);
-      const defaults: Record<string, unknown> = {};
-      for (const input of s.inputs) {
-        if (input.default !== undefined && input.default !== null) {
-          defaults[input.key] = input.default;
-        }
-      }
-      setValues(defaults);
-      const status = await ipc<EnvStatus>("env_status", { scriptId: id });
-      if (selectTokenRef.current !== token) return; // stale
-      setEnvStatus(status);
-      const state = await ipc<ScriptState>("get_state", { scriptId: id });
-      if (selectTokenRef.current !== token) return; // stale
-      setScriptState(state);
-      // Best-effort: a script with no README is the common case, and a failure
-      // here must not stop the form from loading.
-      ipc<ScriptDoc | null>("script_readme", { scriptId: id })
-        .then((doc) => {
-          if (selectTokenRef.current === token) setReadme(doc);
-        })
-        .catch((e) => notifyError(e, "Readme load failed"));
-      if (state.last_values && Object.keys(state.last_values).length > 0) {
-        // Filter last_values to only keys present in current schema (audit M11)
-        const validKeys = new Set(s.inputs.map((i) => i.key));
-        const filtered = Object.fromEntries(
-          Object.entries(state.last_values).filter(([k]) => validKeys.has(k))
-        );
-        setValues({ ...defaults, ...filtered });
-      }
-    } catch (e) {
-      notifyError(e, "Failed to load script");
-    }
-  }, [notifyError]);
-
-  // Re-fetch the same document in another language. The backend falls back to
-  // the default variant if the code no longer resolves, so a deleted
-  // translation degrades to the default rather than blanking the panel.
-  const selectReadmeLang = useCallback(
-    (lang: string | null) => {
-      if (!selectedId) return;
-      ipc<ScriptDoc | null>("script_readme", { scriptId: selectedId, lang })
-        .then((doc) => setReadme(doc))
-        .catch((e) => notifyError(e, "Readme load failed"));
-    },
-    [selectedId, notifyError],
-  );
+    loadScript(id);
+  }, [loadScript]);
 
   const handleImport = useCallback(async () => {
     try {
@@ -320,9 +279,9 @@ export function App() {
         await refresh();
       }
     } catch (e) {
-      notifyError(e, "Import failed");
+      notifyError(e, t("Import failed"));
     }
-  }, [refresh, notifyError]);
+  }, [refresh, notifyError, t]);
 
   const handleImportFile = useCallback(async () => {
     try {
@@ -338,9 +297,9 @@ export function App() {
         await refresh();
       }
     } catch (e) {
-      notifyError(e, "Import failed");
+      notifyError(e, t("Import failed"));
     }
-  }, [refresh, notifyError]);
+  }, [refresh, notifyError, t]);
 
   const handleImportPath = useCallback(async (path: string) => {
     try {
@@ -349,9 +308,9 @@ export function App() {
       setRecentImports(loadRecentImports());
       await refresh();
     } catch (e) {
-      notifyError(e, "Import failed");
+      notifyError(e, t("Import failed"));
     }
-  }, [refresh, notifyError]);
+  }, [refresh, notifyError, t]);
 
   // A Store install already imported on the Rust side; this only stitches it
   // into the UI the way the local imports above do. The recent-imports menu
@@ -361,7 +320,6 @@ export function App() {
     if (folder) saveRecentImport(folder);
     setRecentImports(loadRecentImports());
     refresh();
-    setView("script");
     selectScript(entry.id);
   }, [refresh, selectScript]);
 
@@ -371,9 +329,9 @@ export function App() {
       await run(selectedId, values);
       await ipc("save_last_values", { scriptId: selectedId, values });
     } catch (e) {
-      notifyError(e, "Run failed");
+      notifyError(e, t("Run failed"));
     }
-  }, [selectedId, values, run, notifyError]);
+  }, [selectedId, values, run, notifyError, t]);
 
   const handleCancel = useCallback(() => {
     setShowCancelConfirm(true);
@@ -398,10 +356,10 @@ export function App() {
         await doPrepareEnv(id);
       }
     } catch (e) {
-      notifyError(e, "Failed to list dependencies");
+      notifyError(e, t("Failed to list dependencies"));
       await doPrepareEnv(id);
     }
-  }, [selectedId, preparing]);
+  }, [selectedId, preparing, t]);
 
   const doPrepareEnv = useCallback(async (scriptId?: string) => {
     const id = scriptId ?? selectedId;
@@ -414,7 +372,7 @@ export function App() {
     try {
       await ipc("prepare_env", { scriptId: id });
     } catch (e) {
-      notifyError(e, "Environment setup failed");
+      notifyError(e, t("Environment setup failed"));
     } finally {
       setPreparing(false);
       // Refresh either way: on failure the backend has recorded
@@ -423,10 +381,10 @@ export function App() {
         const status = await ipc<EnvStatus>("env_status", { scriptId: id });
         if (selectedIdRef.current === id) setEnvStatus(status);
       } catch (e) {
-        notifyError(e, "Env status check failed");
+        notifyError(e, t("Env status check failed"));
       }
     }
-  }, [selectedId, preparing, notifyError]);
+  }, [selectedId, preparing, notifyError, selectedIdRef, setEnvStatus, t]);
 
   // Rebuild env from the sidebar context menu. Selects the script first so the
   // user sees env progress in the main pane, then triggers the same prepare-env
@@ -450,9 +408,9 @@ export function App() {
       const status = await ipc<EnvStatus>("env_status", { scriptId });
       if (selectedIdRef.current === scriptId) setEnvStatus(status);
     } catch (e) {
-      notifyError(e, "Refresh failed");
+      notifyError(e, t("Refresh failed"));
     }
-  }, [refresh, notifyError]);
+  }, [refresh, notifyError, selectedIdRef, setSchema, setEnvStatus, t]);
 
   const handleRelink = useCallback(async (id: string) => {
     await refresh();
@@ -465,109 +423,84 @@ export function App() {
         if (selectedIdRef.current !== id) return;
         setEnvStatus(status);
       } catch (e) {
-        notifyError(e, "Relink reload failed");
+        notifyError(e, t("Relink reload failed"));
       }
     }
-  }, [refresh, notifyError]);
+  }, [refresh, notifyError, selectedIdRef, setSchema, setEnvStatus, t]);
 
   const handleRemove = useCallback(async (id: string) => {
     // Cancel running job before removing (audit H11 — prevent orphaned process)
     await cancel(id);
-    if (selectedIdRef.current === id) {
-      setSelectedId(null);
-      setSchema(null);
-      setEnvStatus(null);
-    }
+    clearIfSelected(id);
     clearJob(id);
     await refresh();
-  }, [refresh, clearJob, cancel]);
+  }, [refresh, clearJob, cancel, clearIfSelected]);
 
-  const handleSavePreset = useCallback(async () => {
-    if (!selectedId || !presetName.trim()) return;
-    const name = presetName.trim();
+  /** Re-fetch the selected script's state (presets, history, last values). */
+  const refreshScriptState = useCallback(async () => {
+    const id = selectedIdRef.current;
+    if (!id) return;
     try {
-      await ipc("save_preset", { scriptId: selectedId, name, values });
-      const state = await ipc<ScriptState>("get_state", { scriptId: selectedId });
-      setScriptState(state);
-      setPresetName("");
-      setActivePreset(name);
+      setScriptState(await ipc<ScriptState>("get_state", { scriptId: id }));
     } catch (e) {
-      notifyError(e, "Save preset failed");
+      notifyError(e, t("Could not load script state"));
     }
-  }, [selectedId, presetName, values, notifyError]);
+  }, [selectedIdRef, setScriptState, notifyError, t]);
 
-  const handleLoadPreset = useCallback(async (preset: Preset) => {
+  const handleLoadPreset = useCallback((preset: Preset) => {
     // Merge with schema defaults so new fields not in preset get their default (audit M15)
-    const defaults: Record<string, unknown> = {};
-    if (schema) {
-      for (const input of schema.inputs) {
-        if (input.default !== undefined && input.default !== null) {
-          defaults[input.key] = input.default;
-        }
-      }
-    }
+    const defaults = schema ? defaultsOf(schema) : {};
     setValues({ ...defaults, ...preset.values });
     setActivePreset(preset.name);
-  }, [schema]);
+  }, [schema, setValues]);
 
-  const handleDeletePreset = useCallback(async (name: string) => {
-    if (!selectedId) return;
-    try {
-      await ipc("delete_preset", { scriptId: selectedId, name });
-      const state = await ipc<ScriptState>("get_state", { scriptId: selectedId });
-      setScriptState(state);
-      if (activePreset === name) setActivePreset(null);
-      notify("info", `Deleted preset “${name}”`);
-    } catch (e) {
-      notifyError(e, "Delete preset failed");
-    }
-  }, [selectedId, activePreset, notify, notifyError]);
+  const handlePresetSaved = useCallback((name: string) => {
+    setActivePreset(name);
+    refreshScriptState();
+  }, [refreshScriptState]);
 
-  const handleRenamePreset = useCallback(async (oldName: string, newName: string) => {
-    if (!selectedId || !newName.trim() || newName.trim() === oldName) {
-      setRenaming(null);
-      return;
-    }
-    try {
-      await ipc("rename_preset", { scriptId: selectedId, oldName, newName: newName.trim() });
-      const state = await ipc<ScriptState>("get_state", { scriptId: selectedId });
-      setScriptState(state);
-      if (activePreset === oldName) setActivePreset(newName.trim());
-    } catch (e) {
-      notifyError(e, "Rename preset failed");
-    } finally {
-      setRenaming(null);
-    }
-  }, [selectedId, activePreset, notifyError]);
+  const handlePresetDeleted = useCallback((name: string) => {
+    setActivePreset((cur) => (cur === name ? null : cur));
+    refreshScriptState();
+  }, [refreshScriptState]);
 
+  const handlePresetRenamed = useCallback((oldName: string, newName: string) => {
+    setActivePreset((cur) => (cur === oldName ? newName : cur));
+    refreshScriptState();
+  }, [refreshScriptState]);
+
+  // The viewer reads the source in Rust (`script_source`), never from the
+  // webview: scripts live outside the fs plugin's scope, so a frontend
+  // readTextFile of the entry file fails for most scripts after a restart.
   const handleShowCode = useCallback(async () => {
-    if (!selectedId || !schema) return;
+    const id = selectedIdRef.current;
+    if (!id || !schema) return;
     try {
-      const content = await readTextFile(schema.runtime.entry);
-      setScriptCode(content);
+      const source = await ipc<ScriptSource>("script_source", { scriptId: id });
+      setScriptCode(source);
       setShowCode(true);
     } catch (e) {
-      notifyError(e, "Could not read script");
+      notifyError(e, t("Could not read script"));
       setScriptCode(null);
       setShowCode(false);
     }
-  }, [selectedId, schema, notifyError]);
+  }, [schema, notifyError, selectedIdRef, t]);
 
   const handleDuplicate = useCallback(async (scriptId: string) => {
     try {
       await ipc("duplicate_script", { scriptId });
       await refresh();
-      notify("info", "Script duplicated");
+      notify("info", t("Script duplicated"));
     } catch (e) {
-      notifyError(e, "Duplicate failed");
+      notifyError(e, t("Duplicate failed"));
     }
-  }, [refresh, notify, notifyError]);
+  }, [refresh, notify, notifyError, t]);
 
   const handleExportPresets = useCallback(async (scriptId: string) => {
     try {
       const state = await ipc<ScriptState>("get_state", { scriptId });
       if (state.presets.length === 0) {
-        notify("info", "This script has no presets to export");
+        notify("info", t("This script has no presets to export"));
         return;
       }
       const dest = await save({
@@ -576,12 +509,12 @@ export function App() {
       });
       if (dest) {
         await writeTextFile(dest, JSON.stringify({ presets: state.presets }, null, 2));
-        notify("info", `Exported ${state.presets.length} presets`);
+        notify("info", t("Exported {n} presets", { n: state.presets.length }));
       }
     } catch (e) {
-      notifyError(e, "Export failed");
+      notifyError(e, t("Export failed"));
     }
-  }, [notify, notifyError]);
+  }, [notify, notifyError, t]);
 
   const handleImportPresets = useCallback(async (scriptId: string) => {
     try {
@@ -593,7 +526,7 @@ export function App() {
         const content = await readTextFile(src);
         const data = JSON.parse(content) as { presets: Preset[] };
         if (!data.presets || !Array.isArray(data.presets)) {
-          notify("info", "Invalid presets file");
+          notify("info", t("Invalid presets file"));
           return;
         }
         await ipc("import_presets", { scriptId, presets: data.presets });
@@ -604,12 +537,12 @@ export function App() {
           const kept = scriptState.presets.filter((p) => !importedNames.has(p.name));
           setScriptState({ ...scriptState, presets: [...kept, ...data.presets] });
         }
-        notify("info", `Imported ${data.presets.length} presets`);
+        notify("info", t("Imported {n} presets", { n: data.presets.length }));
       }
     } catch (e) {
-      notifyError(e, "Import failed");
+      notifyError(e, t("Import failed"));
     }
-  }, [selectedId, scriptState, notify, notifyError]);
+  }, [selectedId, scriptState, notify, notifyError, setScriptState, t]);
 
   const handleIntrospect = useCallback(async () => {
     if (!selectedId) return;
@@ -618,81 +551,71 @@ export function App() {
     try {
       const newSchema = await ipc<ScriptSchema>("introspect_script", { scriptId: selectedId });
       setSchema(newSchema);
-      const defaults: Record<string, unknown> = {};
-      for (const input of newSchema.inputs) {
-        if (input.default !== undefined && input.default !== null) {
-          defaults[input.key] = input.default;
-        }
-      }
-      setValues(defaults);
+      setValues(defaultsOf(newSchema));
     } catch (e) {
-      notifyError(e, "Introspection failed");
+      notifyError(e, t("Introspection failed"));
     } finally {
       setIntrospecting(false);
     }
-  }, [selectedId, notifyError]);
+  }, [selectedId, notifyError, setSchema, setValues, t]);
 
   const handleSaveManifest = useCallback(async () => {
     if (!selectedId) return;
     try {
       await ipc("save_generated_manifest", { scriptId: selectedId });
     } catch (e) {
-      notifyError(e, "Save manifest failed");
+      notifyError(e, t("Save manifest failed"));
     }
-  }, [selectedId, notifyError]);
+  }, [selectedId, notifyError, t]);
 
+  // Retry re-runs with the historic values — and records them as the last
+  // values, so switching away and back keeps what was just run (plan P2-2).
   const handleRetry = useCallback(async (entry: HistoryEntry) => {
-    if (!selectedId) return;
+    const id = selectedIdRef.current;
+    if (!id) return;
     setValues(entry.values);
-    await run(selectedId, entry.values);
-  }, [selectedId, run]);
+    try {
+      await run(id, entry.values);
+      await ipc("save_last_values", { scriptId: id, values: entry.values });
+    } catch (e) {
+      notifyError(e, t("Run failed"));
+    }
+  }, [run, setValues, notifyError, selectedIdRef, t]);
 
   // Open a past run's log file or its output directory in Finder (Plan.md §1.2).
   const handleOpenPastRun = useCallback(async (jobId: string, kind: "log" | "files") => {
-    if (!selectedId) return;
+    const id = selectedIdRef.current;
+    if (!id) return;
     try {
-      const dir = await ipc<string>("job_run_dir", { scriptId: selectedId, jobId });
+      const dir = await ipc<string>("job_run_dir", { scriptId: id, jobId });
       if (kind === "log") {
         await revealItemInDir(`${dir}/output.log`);
       } else {
         await openPath(dir);
       }
     } catch (e) {
-      notifyError(e, "Could not open past run");
+      notifyError(e, t("Could not open past run"));
     }
-  }, [selectedId, notifyError]);
-
-  const handleCompare = useCallback((idx: number, entry: HistoryEntry) => {
-    if (compareBase === null) {
-      setCompareBase(idx);
-    } else if (compareBase === idx) {
-      setCompareBase(null);
-    } else {
-      const history = scriptState?.history ?? [];
-      const reversed = history.slice().reverse();
-      setCompareDiff({ base: reversed[compareBase], target: entry });
-      setCompareBase(null);
-    }
-  }, [compareBase, scriptState]);
+  }, [notifyError, selectedIdRef, t]);
 
   const handleValueChange = useCallback((key: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [key]: value }));
-  }, []);
+  }, [setValues]);
 
   const envLabel = (() => {
     if (envProgress) return `${envProgress.message} (${envProgress.pct.toFixed(0)}%)`;
     if (!envStatus) return "";
     switch (envStatus.state) {
       case "ready":
-        return `✓ Ready (${(envStatus.size_bytes / 1_048_576).toFixed(1)} MB)`;
+        return t("✓ Ready ({size} MB)", { size: (envStatus.size_bytes / 1_048_576).toFixed(1) });
       case "missing":
-        return "⚠ Needs setup";
+        return t("⚠ Needs setup");
       case "stale":
-        return "⚠ Stale — needs rebuild";
+        return t("⚠ Stale — needs rebuild");
       case "building":
-        return `Building… ${envStatus.pct.toFixed(0)}%`;
+        return t("Building… {pct}%", { pct: envStatus.pct.toFixed(0) });
       case "failed":
-        return `✗ ${envStatus.message}`;
+        return t("✗ {message}", { message: envStatus.message });
       default:
         return "";
     }
@@ -737,7 +660,6 @@ export function App() {
   const currentJob: JobState | null = selectedId ? (jobs[selectedId] ?? null) : null;
   const running = currentJob?.running ?? false;
   const otherRunningCount = runningScripts.filter((id) => id !== selectedId).length;
-  const [showJobsPanel, setShowJobsPanel] = useState(false);
   const lines = currentJob?.lines ?? [];
   const exitInfo = currentJob?.exitInfo ?? null;
   const structured = currentJob?.structured ?? EMPTY_STRUCTURED;
@@ -776,39 +698,25 @@ export function App() {
 
   const historyCount = scriptState?.history.length ?? 0;
 
-  // History search. `idx` is kept as the index into the *full* reversed list
-  // so Compare (which resolves `reversed[compareBase]`) stays correct even when
-  // entries are filtered out of view.
-  useEffect(() => setHistorySearch(""), [selectedId]);
-  const filteredHistory = useMemo(() => {
-    const reversed = (scriptState?.history ?? []).slice().reverse();
-    const q = historySearch.trim().toLowerCase();
-    if (!q) return reversed.map((entry, idx) => ({ entry, idx }));
-    return reversed
-      .map((entry, idx) => ({ entry, idx }))
-      .filter(({ entry }) => historyHaystack(entry).includes(q));
-  }, [scriptState, historySearch]);
-
   const panes: TabDef<PaneId>[] = [
-    { id: "params", label: "Parameters", badge: schema?.inputs.length || null },
-    { id: "output", label: "Output", badge: lines.length || null },
-    { id: "results", label: "Results", badge: schema?.outputs.result && schema.outputs.result !== "none" ? schema.outputs.result : null, dot: unseen.has("results") },
-    { id: "history", label: "History", badge: historyCount || null },
+    { id: "params", label: t("Parameters"), badge: schema?.inputs.length || null },
+    { id: "output", label: t("Output"), badge: lines.length || null },
+    { id: "results", label: t("Results"), badge: schema?.outputs.result && schema.outputs.result !== "none" ? schema.outputs.result : null, dot: unseen.has("results") },
+    { id: "history", label: t("History"), badge: historyCount || null },
   ];
-
-  // Any dialog that owns the keyboard while it is up. Menu shortcuts are
-  // ignored then — ⌘↩ behind a modal would start a run the user cannot see —
-  // and Escape is the way out (registered per dialog through `useEscape`).
-  const dialogOpen =
-    showConsent || showCode || showDepsConfirm || showOnboarding ||
-    showCancelConfirm || renaming !== null || compareDiff !== null;
 
   // Keyboard shortcuts come from the native menu (src-tauri/src/menu.rs), not
   // from a `window` listener: on macOS a key equivalent claimed by the menu
   // never reaches the webview, so a second binding here would be dead code —
   // and a double-fire on the platforms where it isn't.
+  //
+  // Any modal on screen owns the keyboard: ⌘↩ behind the Store or the Guide
+  // would start a run the user cannot see. `hasOverlay()` asks the keyboard
+  // stack — every dialog registers there through <Modal>, including the ones
+  // whose open/closed state lives inside a child component (rename, compare,
+  // store confirm), and the full-screen Store and Guide overlays.
   useMenuAction((action) => {
-    if (dialogOpen) return;
+    if (hasOverlay()) return;
     switch (action) {
       case "run":
         if (!running && formValid && envReady) handleRun();
@@ -827,6 +735,20 @@ export function App() {
         break;
       case "help:guide":
         setShowGuide(true);
+        break;
+      // The result belongs in Settings — a toast cannot carry a Download
+      // button, and "up to date" is worth saying out loud when asked.
+      case "update:check":
+        setView("settings");
+        appUpdate
+          .check(true)
+          .then((r) =>
+            notify(
+              "info",
+              r ? t("PyShell {version} is available", { version: r.version }) : t("PyShell is up to date"),
+            ),
+          )
+          .catch((e) => notifyError(e, t("Update check failed")));
         break;
       case "settings":
         setView((v) => (v === "settings" ? "script" : "settings"));
@@ -853,26 +775,16 @@ export function App() {
         // ⌘1…⌘9 arrive as the pinned script's own id, so the number never has
         // to be resolved twice — the menu already knows what it points at.
         if (action.startsWith("fav:")) {
-          setView("script");
           selectScript(action.slice(4));
         }
     }
   });
 
-  // Escape closes the innermost dialog. Ordering is handled by the stack in
-  // lib/keyboard, so nested dialogs (Show Code over the consent prompt) peel
-  // off one at a time instead of all at once.
-  useEscape(showCode, () => setShowCode(false));
-  useEscape(renaming !== null, () => setRenaming(null));
-  useEscape(compareDiff !== null, () => setCompareDiff(null));
-  useEscape(showCancelConfirm, () => setShowCancelConfirm(false));
-  useEscape(showDepsConfirm, () => setShowDepsConfirm(false));
-  useEscape(showConsent && !showCode, () => setShowConsent(false));
-  useEscape(showOnboarding, dismissOnboarding);
+  // The dialogs' Escape handling lives in <Modal>; these two are not modals —
+  // the preview strip and the jobs dropdown sit alongside the app, so global
+  // keys keep working behind them.
   useEscape(showCmdPreview, () => setShowCmdPreview(false), false);
-  useEscape(showJobsPanel, () => setShowJobsPanel(false));
-  useEscape(showGuide, () => setShowGuide(false));
-  useEscape(showStore, () => setShowStore(false));
+  useEscape(showJobsPanel, () => setShowJobsPanel(false), false);
 
   return (
     <div class="flex h-screen w-screen overflow-hidden bg-app text-fg">
@@ -885,6 +797,7 @@ export function App() {
         onImportPath={handleImportPath}
         onOpenStore={() => setShowStore(true)}
         storeUpdates={storeUpdates}
+        updateAvailable={appUpdate.release !== null}
         recentImports={recentImports}
         onRelink={handleRelink}
         onRemove={handleRemove}
@@ -906,6 +819,7 @@ export function App() {
             scripts={scripts}
             theme={theme}
             onThemeChange={setTheme}
+            update={appUpdate}
           />
         ) : schema ? (
           <>
@@ -919,7 +833,7 @@ export function App() {
                   <div class="flex items-center gap-2">
                     <h1 class="truncate text-[15px] font-semibold leading-tight">{schema.name}</h1>
                     {schema.version && (
-                      <span class="shrink-0 text-2xs text-subtle" title="Script version">v{schema.version}</span>
+                      <span class="shrink-0 text-2xs text-subtle" title={t("Script version")}>v{schema.version}</span>
                     )}
                   </div>
                   {schema.description && !showReadme && (
@@ -929,14 +843,14 @@ export function App() {
                 {schema.runtime.timeout && (
                   <span
                     class="pill shrink-0 bg-warn/12 text-warn"
-                    title={`This script will be killed after ${schema.runtime.timeout}s unless it exits first`}
+                    title={t("This script will be killed after {n}s unless it exits first", { n: schema.runtime.timeout })}
                   >
                     ⏱ {schema.runtime.timeout}s
                   </span>
                 )}
                 {isGuessed && (
-                  <span class="pill shrink-0 bg-accent/12 text-accent" title={schema?.source === "pep723" ? "Schema inferred from PEP 723 metadata" : "No manifest found — schema is a bare fallback"}>
-                    {schema?.source === "pep723" ? "PEP 723" : "Guessed"}
+                  <span class="pill shrink-0 bg-accent/12 text-accent" title={schema?.source === "pep723" ? t("Schema inferred from PEP 723 metadata") : t("No manifest found — schema is a bare fallback")}>
+                    {schema?.source === "pep723" ? "PEP 723" : t("Guessed")}
                   </span>
                 )}
                 {/* Only *missing* dependencies get a pill — a satisfied one is
@@ -945,9 +859,11 @@ export function App() {
                 {missing.length > 0 && (
                   <span
                     class="pill shrink-0 bg-warn/12 text-warn"
-                    title={`This script expects other scripts to be installed: ${missing.join(", ")}. Install them from the Store (+ Store) — installed ones are passed to it as PYSHELL_DEPS.`}
+                    title={t("This script expects other scripts to be installed: {list}. Install them from the Store (+ Store) — installed ones are passed to it as PYSHELL_DEPS.", { list: missing.join(", ") })}
                   >
-                    Needs: {missing.length === 1 ? missing[0] : `${missing.length} scripts`}
+                    {missing.length === 1
+                      ? t("Needs: {id}", { id: missing[0] })
+                      : t("Needs: {n} scripts", { n: missing.length })}
                   </span>
                 )}
               </div>
@@ -956,17 +872,17 @@ export function App() {
                 <div class="relative shrink-0">
                   <button
                     class="pill shrink-0 bg-ok/12 text-ok hover:bg-ok/20 cursor-pointer"
-                    title={`${otherRunningCount} other script${otherRunningCount === 1 ? "" : "s"} running in background — click to see all jobs`}
+                    title={t("{n} other scripts running", { n: otherRunningCount })}
                     onClick={() => setShowJobsPanel((v) => !v)}
                   >
-                    {otherRunningCount} running ▾
+                    {t("{n} running", { n: otherRunningCount })} ▾
                   </button>
                   {showJobsPanel && (
                     <>
                       <div class="fixed inset-0 z-40" onClick={() => setShowJobsPanel(false)} />
                       <div class="absolute right-0 top-full z-50 mt-1 min-w-64 rounded-lg border border-line bg-raised shadow-panel">
                         <div class="border-b border-line px-3 py-2 text-xs font-medium text-muted">
-                          Active jobs ({runningScripts.length})
+                          {t("Active jobs ({count})", { count: runningScripts.length })}
                         </div>
                         {runningScripts.map((id) => {
                           const s = scripts.find((sc) => sc.id === id);
@@ -982,7 +898,7 @@ export function App() {
                               {j?.structured.progress && (
                                 <span class="text-xs text-muted">{Math.round(j.structured.progress.pct)}%</span>
                               )}
-                              {id === selectedId && <span class="text-xs text-accent">current</span>}
+                              {id === selectedId && <span class="text-xs text-accent">{t("current")}</span>}
                             </button>
                           );
                         })}
@@ -996,11 +912,11 @@ export function App() {
                 <button
                   class={`btn ${showReadme ? "btn-primary" : "btn-secondary"}`}
                   onClick={() => setShowReadme((v) => !v)}
-                  title={`${showReadme ? "Hide" : "Show"} ${readme.name} (⌘D)`}
+                  title={`${showReadme ? t("Hide") : t("Show")} ${readme.name} (⌘D)`}
                   aria-pressed={showReadme}
                 >
                   <BookIcon />
-                  Docs
+                  {t("Docs")}
                 </button>
               )}
 
@@ -1014,14 +930,14 @@ export function App() {
                   onClick={() => handlePrepareEnv()}
                   disabled={running || preparing}
                 >
-                  {preparing ? "Preparing…" : "Prepare Env"}
+                  {preparing ? t("Preparing…") : t("Prepare Env")}
                 </button>
               ) : null}
 
               {running ? (
-                <button class="btn btn-danger" onClick={handleCancel} title="Stop the run (⌘.)">
+                <button class="btn btn-danger" onClick={handleCancel} title={t("Stop the run (⌘.)")}>
                   <StopIcon />
-                  Cancel
+                  {t("Cancel")}
                 </button>
               ) : (
                 <>
@@ -1030,35 +946,35 @@ export function App() {
                       class="btn btn-secondary"
                       onClick={handleRun}
                       disabled={!formValid || !envReady}
-                      title="Run again with the same values (⌘↩)"
+                      title={t("Run again with the same values (⌘↩)")}
                     >
-                      Run again
+                      {t("Run again")}
                     </button>
                   )}
                   {errorCount > 0 && (
                     <button
                       class="btn btn-secondary text-warn"
                       onClick={jumpToFirstError}
-                      title={`${errorCount} field${errorCount === 1 ? "" : "s"} need attention — click to jump to the first one`}
+                      title={t("{n} fields need attention", { n: errorCount })}
                     >
-                      {errorCount} {errorCount === 1 ? "error" : "errors"}
+                      {t("{n} errors", { n: errorCount })}
                     </button>
                   )}
                   <button
                     class="btn btn-secondary"
                     onClick={handleResetDefaults}
-                    title="Reset all fields to schema defaults"
+                    title={t("Reset all fields to schema defaults")}
                     disabled={running}
                   >
-                    Reset
+                    {t("Reset")}
                   </button>
                   <button
                     class="btn btn-secondary"
                     onClick={handlePreviewCommand}
                     disabled={!formValid || !envReady}
-                    title="Preview the command line that will be executed"
+                    title={t("Preview the command line that will be executed")}
                   >
-                    Preview
+                    {t("Preview")}
                   </button>
                   <button
                     class="btn btn-run"
@@ -1066,14 +982,14 @@ export function App() {
                     disabled={!formValid || !envReady}
                     title={
                       !envReady
-                        ? "Prepare the environment first"
+                        ? t("Prepare the environment first")
                         : !formValid
-                          ? "Fix the highlighted fields first"
-                          : "Run the script (⌘↩)"
+                          ? t("Fix the highlighted fields first")
+                          : t("Run the script (⌘↩)")
                     }
                   >
                     <PlayIcon />
-                    Run
+                    {t("Run")}
                   </button>
                 </>
               )}
@@ -1090,7 +1006,7 @@ export function App() {
                   class="btn btn-secondary shrink-0"
                   onClick={() => setShowCmdPreview(false)}
                 >
-                  Close
+                  {t("Close")}
                 </button>
               </div>
             )}
@@ -1099,16 +1015,16 @@ export function App() {
                 is a fallback; the error explains why it looks wrong. */}
             {schemaError && (
               <div class="flex shrink-0 items-start gap-3 border-b border-line bg-danger/[0.08] px-5 py-2">
-                <span class="mt-px font-semibold text-danger">Manifest error</span>
+                <span class="mt-px font-semibold text-danger">{t("Manifest error")}</span>
                 <pre class="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-2xs leading-snug text-danger">
 {schemaError}
                 </pre>
                 <button
                   class="btn btn-secondary shrink-0"
                   onClick={() => selectedId && handleRelink(selectedId)}
-                  title="Re-read the manifest from disk"
+                  title={t("Re-read the manifest from disk")}
                 >
-                  Reload
+                  {t("Reload")}
                 </button>
               </div>
             )}
@@ -1118,19 +1034,19 @@ export function App() {
               <div class="flex shrink-0 items-center gap-3 border-b border-line bg-accent/[0.07] px-5 py-2">
                 <span class="flex-1 text-[13px] text-muted">
                   {schema?.source === "pep723"
-                    ? "Fields were guessed from PEP 723 metadata. Introspection reads the script's real arguments."
-                    : "No manifest found — the form below is a bare fallback. Introspection reads the script's real arguments."}
+                    ? t("Fields were guessed from PEP 723 metadata. Introspection reads the script's real arguments.")
+                    : t("No manifest found — the form below is a bare fallback. Introspection reads the script's real arguments.")}
                 </span>
                 <button
                   class="btn btn-primary"
                   onClick={() => setShowConsent(true)}
                   disabled={!envReady || introspecting}
-                  title={envReady ? "Run introspection" : "Prepare the environment first"}
+                  title={envReady ? t("Run introspection") : t("Prepare the environment first")}
                 >
-                  {introspecting ? "Introspecting…" : "Introspect"}
+                  {introspecting ? t("Introspecting…") : t("Introspect")}
                 </button>
                 <button class="btn btn-secondary" onClick={handleSaveManifest}>
-                  Save Manifest
+                  {t("Save Manifest")}
                 </button>
               </div>
             )}
@@ -1143,14 +1059,14 @@ export function App() {
                 }`}
               >
                 <span class="flex-1 text-[13px] text-muted">
-                  {envStatus.state === "missing" && "Environment not set up. Click Prepare Env to create an isolated venv."}
-                  {envStatus.state === "stale" && `Environment is stale: ${envStatus.reason}. Rebuild required.`}
-                  {envStatus.state === "failed" && `Environment failed: ${envStatus.message}`}
-                  {envStatus.state === "building" && `Building environment… ${envStatus.pct.toFixed(0)}%`}
+                  {envStatus.state === "missing" && t("Environment not set up. Click Prepare Env to create an isolated venv.")}
+                  {envStatus.state === "stale" && t("Environment is stale: {reason}. Rebuild required.", { reason: envStatus.reason })}
+                  {envStatus.state === "failed" && t("Environment failed: {message}", { message: envStatus.message })}
+                  {envStatus.state === "building" && t("Building environment… {pct}%", { pct: envStatus.pct.toFixed(0) })}
                 </span>
                 {(envStatus.state === "missing" || envStatus.state === "stale") && (
                   <button class="btn btn-warn" onClick={() => handlePrepareEnv()} disabled={running || preparing}>
-                    {preparing ? "Preparing…" : "Prepare Env"}
+                    {preparing ? t("Preparing…") : t("Prepare Env")}
                   </button>
                 )}
               </div>
@@ -1184,7 +1100,7 @@ export function App() {
                     checked={autoScroll}
                     onChange={(e) => setAutoScroll(e.currentTarget.checked)}
                   />
-                  Auto-scroll
+                  {t("Auto-scroll")}
                 </label>
               ) : null}
             </Tabs>
@@ -1208,55 +1124,22 @@ export function App() {
                     </div>
                     {/* Presets (Plan.md §M6) — pinned, so they stay reachable
                         no matter how long the form is. */}
-                    <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-t border-line bg-surface px-5 py-2">
-                      <span class="panel-title mr-1">Presets</span>
-                      {scriptState?.presets.length === 0 && (
-                        <span class="text-2xs text-subtle">None saved yet</span>
-                      )}
-                      {scriptState?.presets.map((p) => {
-                        const isActive = activePreset === p.name;
-                        return (
-                          <button
-                            key={p.name}
-                            class={`btn py-1 ${isActive ? "btn-primary" : "btn-secondary"}`}
-                            onClick={() => handleLoadPreset(p)}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              setPresetMenu({ x: e.clientX, y: e.clientY, preset: p });
-                            }}
-                            title={isActive ? (presetModified ? "Loaded — modified" : "Loaded") : "Load this preset"}
-                          >
-                            {p.name}
-                            {isActive && presetModified && (
-                              <span class="ml-1 h-1.5 w-1.5 rounded-full bg-warn" title="Modified" />
-                            )}
-                          </button>
-                        );
-                      })}
-                      <div class="ml-auto flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          placeholder="New preset…"
-                          value={presetName}
-                          onInput={(e) => setPresetName(e.currentTarget.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && presetName.trim()) handleSavePreset();
-                          }}
-                          class="form-input w-36 py-1 text-xs"
-                        />
-                        <button
-                          class="btn btn-primary py-1"
-                          onClick={handleSavePreset}
-                          disabled={!presetName.trim()}
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </div>
+                    <PresetsBar
+                      scriptId={schema.id}
+                      values={values}
+                      presets={scriptState?.presets ?? []}
+                      activePreset={activePreset}
+                      presetModified={presetModified}
+                      onLoadPreset={handleLoadPreset}
+                      onSaved={handlePresetSaved}
+                      onDeleted={handlePresetDeleted}
+                      onRenamed={handlePresetRenamed}
+                      refreshState={refreshScriptState}
+                    />
                   </>
                 ) : (
                   <div class="flex flex-1 items-center justify-center px-8 text-center">
-                    <p class="text-[13px] text-muted">This script takes no parameters.</p>
+                    <p class="text-[13px] text-muted">{t("This script takes no parameters.")}</p>
                   </div>
                 ))}
 
@@ -1277,117 +1160,14 @@ export function App() {
                 />
               )}
 
-              {pane === "history" && (
-                <div class="flex min-h-0 flex-1 flex-col">
-                  {historyCount > 0 && (
-                    <div class="flex shrink-0 items-center gap-2 border-b border-line px-5 py-2">
-                      <div class="relative min-w-0 flex-1">
-                        <SearchIcon size={13} class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-subtle" />
-                        <input
-                          type="text"
-                          class="form-input w-full py-1 pl-7 pr-7 text-xs"
-                          aria-label="Search history"
-                          placeholder="Search runs…"
-                          value={historySearch}
-                          onInput={(e) => setHistorySearch(e.currentTarget.value)}
-                          onKeyDown={(e) => { if (e.key === "Escape") setHistorySearch(""); }}
-                        />
-                        {historySearch && (
-                          <button
-                            class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-fg"
-                            onClick={() => setHistorySearch("")}
-                            title="Clear search"
-                          >
-                            <CloseIcon size={12} />
-                          </button>
-                        )}
-                      </div>
-                      {historySearch.trim() && filteredHistory.length !== historyCount && (
-                        <span class="shrink-0 tabular-nums text-2xs text-subtle">
-                          {filteredHistory.length} / {historyCount}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <div class="flex-1 overflow-y-auto px-5 py-3">
-                    {historyCount === 0 ? (
-                      <div class="flex h-full items-center justify-center text-center">
-                        <p class="text-[13px] text-muted">No runs yet.</p>
-                      </div>
-                    ) : filteredHistory.length === 0 ? (
-                      <div class="flex h-full items-center justify-center text-center">
-                        <p class="text-[13px] text-muted">No runs match "{historySearch}".</p>
-                      </div>
-                    ) : (
-                      <div class="flex flex-col">
-                        {filteredHistory.map(({ entry, idx }) => (
-                          <div
-                            key={entry.job_id ?? `${entry.timestamp}-${idx}`}
-                            class="row-hover group -mx-1.5 flex items-center gap-3 rounded px-1.5 py-1.5 text-2xs"
-                          >
-                            <span
-                              class={`shrink-0 ${entry.exit_code === 0 ? "text-ok" : "text-danger"}`}
-                              title={entry.exit_code === 0 ? "Succeeded" : "Failed"}
-                              aria-label={entry.exit_code === 0 ? "Succeeded" : "Failed"}
-                            >
-                              {entry.exit_code === 0 ? <CheckIcon size={12} /> : <CloseIcon size={12} />}
-                            </span>
-                            <span class="tabular-nums text-muted">
-                              {new Date(entry.timestamp).toLocaleString()}
-                            </span>
-                            <span
-                              class={`tabular-nums ${
-                                entry.exit_code === 0 ? "text-ok" : "text-danger"
-                              }`}
-                            >
-                              exit {entry.exit_code ?? "—"}
-                            </span>
-                            <span class="tabular-nums text-subtle">
-                              {(entry.duration_ms / 1000).toFixed(1)}s
-                            </span>
-                            <div class="ml-auto flex items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                              {entry.job_id && (
-                                <>
-                                  <button
-                                    class="text-subtle hover:text-fg disabled:opacity-30"
-                                    onClick={() => handleOpenPastRun(entry.job_id!, "log")}
-                                    title="Reveal this run's log in Finder"
-                                  >
-                                    Log
-                                  </button>
-                                  <button
-                                    class="text-subtle hover:text-fg disabled:opacity-30"
-                                    onClick={() => handleOpenPastRun(entry.job_id!, "files")}
-                                    title="Open this run's output folder"
-                                  >
-                                    Files
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                class={`hover:underline disabled:opacity-30 ${
-                                  compareBase === idx ? "text-accent font-medium" : "text-subtle hover:text-fg"
-                                }`}
-                                onClick={() => handleCompare(idx, entry)}
-                                title={compareBase === null ? "Select for comparison" : compareBase === idx ? "Cancel comparison" : "Compare with this run"}
-                              >
-                                {compareBase === idx ? "Cancel" : "Compare"}
-                              </button>
-                              <button
-                                class="text-accent hover:underline disabled:opacity-30"
-                                onClick={() => handleRetry(entry)}
-                                disabled={running}
-                                title="Re-run with these values"
-                              >
-                                Retry
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+              {pane === "history" && selectedId && (
+                <HistoryPanel
+                  scriptId={selectedId}
+                  history={scriptState?.history ?? []}
+                  running={running}
+                  onRetry={handleRetry}
+                  onOpenPastRun={handleOpenPastRun}
+                />
               )}
             </div>
 
@@ -1400,9 +1180,9 @@ export function App() {
             {!loading && (
               <>
                 <span class="text-3xl opacity-40">🐍</span>
-                <p class="text-[13px] font-medium text-muted">No script selected</p>
+                <p class="text-[13px] font-medium text-muted">{t("No script selected")}</p>
                 <p class="max-w-xs text-2xs leading-relaxed text-subtle">
-                  Pick one from the sidebar, or import a new script to get started.
+                  {t("Pick one from the sidebar, or import a new script to get started.")}
                 </p>
               </>
             )}
@@ -1420,39 +1200,11 @@ export function App() {
 
       {/* Introspection consent dialog (Plan.md §M7) */}
       {showConsent && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setShowConsent(false)}>
-          <div class="w-full max-w-md rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <h2 class="mb-1.5 text-[15px] font-semibold">Run Introspection?</h2>
-            <p class="mb-4 text-[13px] leading-relaxed text-muted">
-              PyShell will execute this script to detect its arguments.
-              This runs all code at the module top-level — imports, function
-              definitions, and any code outside <code>if __name__</code>.
-              A 10-second timeout is enforced. No secrets are passed.
-            </p>
-            <div class="flex justify-between gap-2">
-              <button
-                class="btn btn-secondary px-3 py-1.5"
-                onClick={handleShowCode}
-              >
-                Show Code
-              </button>
-              <div class="flex gap-2">
-                <button
-                  class="btn btn-secondary px-3 py-1.5"
-                  onClick={() => setShowConsent(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  class="btn btn-primary px-3 py-1.5"
-                  onClick={handleIntrospect}
-                >
-                  Run Introspection
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConsentDialog
+          onShowCode={handleShowCode}
+          onClose={() => setShowConsent(false)}
+          onConfirm={handleIntrospect}
+        />
       )}
 
       {/* Script code viewer */}
@@ -1463,220 +1215,41 @@ export function App() {
           scripts={scripts}
           runningScripts={runningScripts}
           onInstalled={handleStoreInstalled}
+          onRemoved={handleRemove}
           onClose={() => setShowStore(false)}
         />
       )}
 
-      {showCode && (
-        <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] backdrop-blur-sm" onClick={() => setShowCode(false)}>
-          <div class="mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="text-lg font-semibold">Script Code</h2>
-              <button
-                class="btn btn-ghost"
-                onClick={() => setShowCode(false)}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <pre class="flex-1 overflow-auto rounded-lg border border-line bg-surface p-3 font-mono text-xs leading-relaxed">
-              {scriptCode}
-            </pre>
-            <p class="mt-2 text-2xs text-subtle">
-              This is the code that will be executed during introspection.
-              Review it before proceeding.
-            </p>
-          </div>
-        </div>
+      {showCode && scriptCode && (
+        <CodeDialog source={scriptCode} onClose={() => setShowCode(false)} />
       )}
 
       {/* Dependency confirmation dialog (Plan.md §M2) */}
       {showDepsConfirm && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setShowDepsConfirm(false)}>
-          <div class="w-full max-w-lg rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <h2 class="mb-1.5 text-[15px] font-semibold">Install Dependencies?</h2>
-            <p class="mb-3 text-[13px] leading-relaxed text-muted">
-              The following packages will be installed in an isolated virtual environment:
-            </p>
-            <div class="mb-4 max-h-48 overflow-y-auto rounded-lg border border-line bg-surface p-2">
-              {depsList.map((dep) => (
-                <div key={dep} class="text-sm font-mono">{dep}</div>
-              ))}
-            </div>
-            <p class="mb-4 text-2xs text-subtle">
-              Only pre-built wheels are used when available. Building from source (sdist) is supported as fallback for Python 3.13+.
-            </p>
-            <div class="flex justify-end gap-2">
-              <button
-                class="btn btn-secondary px-3 py-1.5"
-                onClick={() => setShowDepsConfirm(false)}
-              >
-                Cancel
-              </button>
-              <button class="btn btn-run px-3 py-1.5" autoFocus onClick={() => doPrepareEnv()}>
-                Install
-              </button>
-            </div>
-          </div>
-        </div>
+        <DepsConfirmDialog
+          deps={depsList}
+          onClose={() => setShowDepsConfirm(false)}
+          onInstall={() => doPrepareEnv()}
+        />
       )}
 
       {/* Onboarding dialog (Plan.md §M8) */}
       {showOnboarding && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={dismissOnboarding}>
-          <div class="w-full max-w-md rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <h2 class="mb-2 text-[15px] font-semibold">Welcome to PyShell</h2>
-            <p class="mb-3 text-[13px] leading-relaxed text-muted">
-              PyShell runs Python scripts in isolated virtual environments. To
-              prepare environments and install dependencies, the app needs
-              network access to download Python interpreters and packages via
-              <code class="mx-0.5 rounded bg-fg/10 px-1 font-mono text-[12px]">uv</code>.
-            </p>
-            <p class="mb-3 text-[13px] leading-relaxed text-muted">
-              Scripts run locally on your machine with full system access
-              (no sandbox). Import only scripts you trust.
-            </p>
-            <p class="mb-4 text-[13px] leading-relaxed text-muted">
-              Need something to run? The{" "}
-              <span class="font-medium text-muted">+ Store</span> button in the sidebar
-              installs ready-made scripts from the community repo.
-            </p>
-            <div class="flex justify-end gap-2">
-              <button
-                class="btn btn-secondary px-3 py-1.5"
-                onClick={() => {
-                  dismissOnboarding();
-                  setShowStore(true);
-                }}
-              >
-                Browse the Store
-              </button>
-              <button class="btn btn-primary px-3 py-1.5" autoFocus onClick={dismissOnboarding}>
-                Got it
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Preset context menu (Plan.md §1.3) */}
-      {presetMenu && (
-        <ContextMenu
-          x={presetMenu.x}
-          y={presetMenu.y}
-          items={[
-            { label: "Load", onSelect: () => handleLoadPreset(presetMenu.preset) },
-            { label: "Rename…", onSelect: () => { setRenameValue(presetMenu.preset.name); setRenaming(presetMenu.preset.name); } },
-            { label: "Delete", separated: true, icon: <TrashIcon size={13} />, onSelect: () => handleDeletePreset(presetMenu.preset.name) },
-          ]}
-          onClose={() => setPresetMenu(null)}
+        <OnboardingDialog
+          onDismiss={dismissOnboarding}
+          onBrowseStore={() => {
+            dismissOnboarding();
+            setShowStore(true);
+          }}
         />
-      )}
-
-      {/* Rename preset dialog */}
-      {renaming && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setRenaming(null)}>
-          <div class="w-full max-w-sm rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <h2 class="mb-3 text-[15px] font-semibold">Rename preset</h2>
-            <input
-              type="text"
-              class="form-input mb-4"
-              value={renameValue}
-              autoFocus
-              onInput={(e) => setRenameValue(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleRenamePreset(renaming, renameValue);
-              }}
-            />
-            <div class="flex justify-end gap-2">
-              <button class="btn btn-secondary" onClick={() => setRenaming(null)}>Cancel</button>
-              <button
-                class="btn btn-primary"
-                onClick={() => handleRenamePreset(renaming, renameValue)}
-                disabled={!renameValue.trim() || renameValue.trim() === renaming}
-              >
-                Rename
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Cancel confirmation (Plan.md §1.7) */}
       {showCancelConfirm && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCancelConfirm(false)}>
-          <div class="max-w-sm rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <h2 class="mb-1.5 text-[15px] font-semibold">Cancel this run?</h2>
-            <p class="mb-4 text-[13px] leading-relaxed text-muted">
-              The script and all its child processes will be killed immediately. Any partial
-              output is kept in the log.
-            </p>
-            <div class="flex justify-end gap-2">
-              <button class="btn btn-secondary" autoFocus onClick={() => setShowCancelConfirm(false)}>
-                Keep running
-              </button>
-              <button class="btn btn-danger" onClick={doCancel}>
-                Cancel run
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Run comparison diff (Plan.md §2.2) */}
-      {compareDiff && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setCompareDiff(null)}>
-          <div class="max-w-2xl w-full max-h-[80vh] overflow-y-auto rounded-xl border border-line bg-raised p-5 shadow-panel" onClick={(e) => e.stopPropagation()}>
-            <div class="mb-4 flex items-center justify-between">
-              <h2 class="text-[15px] font-semibold">Run comparison</h2>
-              <button class="btn btn-secondary" onClick={() => setCompareDiff(null)}>Close</button>
-            </div>
-            <div class="mb-4 flex gap-6 text-2xs text-subtle">
-              <div>
-                <span class="font-medium text-muted">Base:</span>{" "}
-                {new Date(compareDiff.base.timestamp).toLocaleString()} · exit {compareDiff.base.exit_code ?? "—"}
-              </div>
-              <div>
-                <span class="font-medium text-muted">Target:</span>{" "}
-                {new Date(compareDiff.target.timestamp).toLocaleString()} · exit {compareDiff.target.exit_code ?? "—"}
-              </div>
-            </div>
-            <div class="space-y-1.5">
-              {(() => {
-                const allKeys = new Set([
-                  ...Object.keys(compareDiff.base.values),
-                  ...Object.keys(compareDiff.target.values),
-                ]);
-                const rows = Array.from(allKeys).sort().map((key) => {
-                  const baseVal = compareDiff.base.values[key];
-                  const targetVal = compareDiff.target.values[key];
-                  const changed = JSON.stringify(baseVal) !== JSON.stringify(targetVal);
-                  return { key, baseVal, targetVal, changed };
-                });
-                const changedCount = rows.filter((r) => r.changed).length;
-                if (changedCount === 0) {
-                  return <p class="text-[13px] text-muted">No differences — both runs used the same values.</p>;
-                }
-                return (
-                  <>
-                    <p class="mb-2 text-2xs text-subtle">{changedCount} field{changedCount === 1 ? "" : "s"} changed</p>
-                    {rows.filter((r) => r.changed).map((r) => (
-                      <div key={r.key} class="grid grid-cols-[120px_1fr_1fr] gap-2 rounded-lg border border-line px-3 py-2 text-xs">
-                        <span class="font-mono text-muted">{r.key}</span>
-                        <span class="font-mono text-danger line-through opacity-70">
-                          {r.baseVal === undefined ? "—" : typeof r.baseVal === "object" ? JSON.stringify(r.baseVal) : String(r.baseVal)}
-                        </span>
-                        <span class="font-mono text-ok">
-                          {r.targetVal === undefined ? "—" : typeof r.targetVal === "object" ? JSON.stringify(r.targetVal) : String(r.targetVal)}
-                        </span>
-                      </div>
-                    ))}
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
+        <CancelConfirmDialog
+          onKeepRunning={() => setShowCancelConfirm(false)}
+          onCancelRun={doCancel}
+        />
       )}
     </div>
   );

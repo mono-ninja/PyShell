@@ -531,6 +531,12 @@ pub async fn remove_script(
         }
     }
 
+    // Keychain secrets must not outlive the script (plan P1-1): the schema is
+    // still on disk here, so `forget_script` can collect `InputType::Secret`
+    // inputs alongside whatever the registry recorded. Must run before the
+    // schema file is removed below. Best-effort, like the env deletion.
+    crate::commands::secrets::forget_script(&state, &script_id);
+
     // Remove saved schema (Plan.md §3.4: previously leaked)
     let schema_file = state.app_support_dir.join("schemas").join(format!("{}.json", script_id));
     let _ = std::fs::remove_file(&schema_file);
@@ -716,6 +722,65 @@ pub async fn script_readme(
             })
             .collect(),
     }))
+}
+
+/// Maximum script size handed to the Show Code viewer. Same order as the
+/// README cap: past this, "review the code in a dialog" is not a real offer.
+const SOURCE_MAX_BYTES: u64 = 512 * 1024;
+
+/// Read a script's own source code for the "Show Code" viewer.
+///
+/// The path is resolved **in Rust** from the script list — the frontend sends
+/// only a `script_id`, never a path (the same rule as `script_folder` / Open
+/// in PyCharm). That rule is also what makes the viewer work at all: scripts
+/// are referenced in place and can live anywhere on disk, while the fs plugin's
+/// scope only reaches app-specific directories and paths the user just picked
+/// in a dialog — so a frontend `readTextFile` of the entry file fails for most
+/// scripts as soon as the app restarts.
+#[tauri::command]
+pub async fn script_source(
+    script_id: String,
+    state: State<'_, AppState>,
+) -> Result<manifest::model::ScriptSource> {
+    let entry_path = {
+        let scripts = state.scripts.lock().unwrap();
+        scripts
+            .iter()
+            .find(|s| s.id == script_id)
+            .map(|s| s.path.clone())
+            .ok_or_else(|| AppError::ScriptNotFound(script_id.clone()))?
+    };
+
+    if !entry_path.exists() {
+        return Err(AppError::ScriptNotFound(format!(
+            "file moved or deleted: {}",
+            entry_path.display()
+        )));
+    }
+
+    let size = std::fs::metadata(&entry_path).map(|m| m.len()).unwrap_or(0);
+    if size > SOURCE_MAX_BYTES {
+        return Err(AppError::Other(format!(
+            "{} is {} KB — too large to display (limit {} KB)",
+            entry_path.display(),
+            size / 1024,
+            SOURCE_MAX_BYTES / 1024
+        )));
+    }
+
+    // Lossy on purpose, same as the README: a stray non-UTF-8 byte should not
+    // blank the viewer.
+    let bytes = std::fs::read(&entry_path)?;
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+
+    Ok(manifest::model::ScriptSource {
+        name: entry_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        path: entry_path,
+        content,
+    })
 }
 
 /// Look for the document to show in the Docs panel, case-insensitively.

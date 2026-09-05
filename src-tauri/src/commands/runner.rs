@@ -43,6 +43,11 @@ pub async fn run_script(
     let bookmark_store_for_task = bookmark_store.clone();
     let script_id_for_bookmark = script_id.clone();
 
+    // Retention comes from the user settings (Settings ▸ History & limits) and
+    // governs both run folders and History entries for this run — see
+    // `spawn_script`.
+    let retention = crate::store::settings::load(&state.app_support_dir).retention_runs;
+
     // Spawn
     let job_id = runner::spawn::spawn_script(
         &schema,
@@ -54,6 +59,7 @@ pub async fn run_script(
         &state.jobs,
         state.output_dir(),
         state.state_dir(),
+        retention,
         move |job_handle| {
             let _ = job_handle;
             let has_access = bookmark_store_for_task.start_access(&script_id_for_bookmark);

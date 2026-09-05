@@ -2,13 +2,14 @@ import { createContext } from "preact";
 import { useContext, useState, useEffect, useCallback } from "preact/hooks";
 import type { JSX } from "preact";
 import { CloseIcon } from "./icons";
+import { useI18n } from "../lib/i18n";
 
 export interface ToastMessage {
   text: string;
   kind: "info" | "error";
 }
 
-interface ToastApi {
+export interface ToastApi {
   /** Show a toast of the given kind with `text`. */
   notify: (kind: ToastMessage["kind"], text: string) => void;
   /** Show an error toast, deriving the message from anything caught. */
@@ -36,10 +37,11 @@ interface ToastProps {
  * dismissed — a failure the user misses is a failure they cannot act on.
  */
 export function Toast({ message, onDismiss }: ToastProps) {
+  const { t } = useI18n();
   useEffect(() => {
     if (!message || message.kind === "error") return;
-    const t = setTimeout(onDismiss, 2600);
-    return () => clearTimeout(t);
+    const timer = setTimeout(onDismiss, 2600);
+    return () => clearTimeout(timer);
   }, [message, onDismiss]);
 
   if (!message) return null;
@@ -63,7 +65,7 @@ export function Toast({ message, onDismiss }: ToastProps) {
           type="button"
           class="shrink-0 pt-0.5 text-subtle transition-colors hover:text-fg"
           onClick={onDismiss}
-          aria-label="Dismiss"
+          aria-label={t("Dismiss")}
         >
           <CloseIcon size={12} />
         </button>

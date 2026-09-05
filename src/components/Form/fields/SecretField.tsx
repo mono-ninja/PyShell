@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import { ipc } from "../../../lib/ipc";
 import { CloseIcon, LockIcon } from "../../icons";
+import { useI18n } from "../../../lib/i18n";
 
 export const SECRET_SET_SENTINEL = "__secret_set__";
 
@@ -12,6 +13,7 @@ interface SecretFieldProps {
 }
 
 export function SecretField({ id, scriptId, fieldKey, onChange }: SecretFieldProps) {
+  const { t } = useI18n();
   const [hasSecret, setHasSecret] = useState(false);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
@@ -63,21 +65,21 @@ export function SecretField({ id, scriptId, fieldKey, onChange }: SecretFieldPro
     return (
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center gap-1.5">
-          <span class="form-picker min-w-0 flex-1" title="Stored in the system keychain">
+          <span class="form-picker min-w-0 flex-1" title={t("Stored in the system keychain")}>
             <LockIcon class="text-subtle" />
             <span class="flex-1 tracking-[0.2em] text-muted">••••••••</span>
-            <span class="shrink-0 text-2xs text-subtle">Saved</span>
+            <span class="shrink-0 text-2xs text-subtle">{t("Saved")}</span>
           </span>
           <button type="button" class="btn btn-secondary" onClick={() => setEditing(true)}>
-            Change
+            {t("Change")}
           </button>
           <button
             type="button"
             class="btn btn-ghost hover:text-danger"
             onClick={handleDelete}
             disabled={saving}
-            title="Delete from keychain"
-            aria-label="Delete secret from keychain"
+            title={t("Delete from keychain")}
+            aria-label={t("Delete secret from keychain")}
           >
             <CloseIcon size={12} />
           </button>
@@ -94,7 +96,7 @@ export function SecretField({ id, scriptId, fieldKey, onChange }: SecretFieldPro
           id={id}
           type="password"
           class="form-input flex-1"
-          placeholder="Enter secret value"
+          placeholder={t("Enter secret value")}
           value={value}
           onInput={(e) => setValue(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -107,15 +109,15 @@ export function SecretField({ id, scriptId, fieldKey, onChange }: SecretFieldPro
           onClick={handleSave}
           disabled={saving || !value}
         >
-          {saving ? "…" : "Save"}
+          {saving ? "…" : t("Save")}
         </button>
         {hasSecret && (
           <button type="button" class="btn btn-ghost" onClick={() => setEditing(false)}>
-            Cancel
+            {t("Cancel")}
           </button>
         )}
       </div>
-      <span class="field-help">Stored in the system keychain, passed to the script as an env var.</span>
+      <span class="field-help">{t("Stored in the system keychain, passed to the script as an env var.")}</span>
       {error && <span class="field-error">{error}</span>}
     </div>
   );

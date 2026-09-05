@@ -1,5 +1,6 @@
 import type { JobEvent } from "../types/schema";
 import type { StructuredState } from "../hooks/useJobs";
+import { useI18n } from "../lib/i18n";
 
 interface RunStatusBarProps {
   running: boolean;
@@ -16,6 +17,7 @@ interface RunStatusBarProps {
  * table, history) is tabbed.
  */
 export function RunStatusBar({ running, structured, exitInfo }: RunStatusBarProps) {
+  const { t } = useI18n();
   const { progress, status } = structured;
   const exited = exitInfo?.kind === "exit" ? exitInfo : null;
 
@@ -34,7 +36,7 @@ export function RunStatusBar({ running, structured, exitInfo }: RunStatusBarProp
           />
         )}
         <span class="min-w-0 flex-1 truncate text-[13px] text-muted">
-          {progress?.message || status || (running ? "Running…" : "")}
+          {progress?.message || status || (running ? t("Running…") : "")}
         </span>
         {progress && (
           <span class="shrink-0 tabular-nums text-2xs text-subtle">
@@ -57,7 +59,7 @@ export function RunStatusBar({ running, structured, exitInfo }: RunStatusBarProp
           aria-valuenow={Math.round(progress.pct)}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-label={progress.message || "Progress"}
+          aria-label={progress.message || t("Progress")}
         >
           <div
             class="h-full rounded-full bg-accent transition-all duration-300"

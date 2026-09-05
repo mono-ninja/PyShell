@@ -28,6 +28,10 @@ pub struct AppState {
     /// dialog and kept so installs don't re-ask the GitHub API (60 requests/h
     /// unauthenticated); the dialog's Refresh replaces it wholesale.
     pub repo_catalog: Mutex<Option<Arc<repo::Catalog>>>,
+    /// The last answer of the "is a newer PyShell out?" check, with the time it
+    /// was made — so the startup check and the Settings pane share one request
+    /// (`repo::UPDATE_TTL`).
+    pub app_update: Mutex<Option<repo::UpdateCheck>>,
 }
 
 impl AppState {
@@ -40,6 +44,7 @@ impl AppState {
             watcher_tx: Mutex::new(None),
             menu_favorites: Mutex::new(Vec::new()),
             repo_catalog: Mutex::new(None),
+            app_update: Mutex::new(None),
         }
     }
 
@@ -213,12 +218,14 @@ pub fn run() {
             commands::scripts::introspect_script,
             commands::scripts::save_generated_manifest,
             commands::scripts::script_readme,
+            commands::scripts::script_source,
             commands::scripts::script_folder,
             commands::scripts::open_in_pycharm,
             commands::scripts::open_in_terminal,
             commands::repo::repo_catalog,
             commands::repo::repo_install,
             commands::repo::repo_update,
+            commands::repo::check_app_update,
             commands::favorites::list_favorites,
             commands::favorites::toggle_favorite,
             commands::runner::run_script,
@@ -235,12 +242,15 @@ pub fn run() {
             commands::secrets::set_secret,
             commands::secrets::has_secret,
             commands::secrets::delete_secret,
+            commands::secrets::secrets_list,
             commands::state::get_state,
             commands::state::save_preset,
             commands::state::delete_preset,
             commands::state::rename_preset,
             commands::state::save_last_values,
             commands::state::import_presets,
+            commands::settings::get_settings,
+            commands::settings::set_settings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

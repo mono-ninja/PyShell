@@ -43,6 +43,9 @@ const HELP_SCRIPTS: &str = "help:scripts";
 pub const SCRIPTS_URL: &str = "https://github.com/mono-ninja/PyShell-scripts";
 /// Routed to the frontend, which renders the guide in an overlay.
 const HELP_GUIDE: &str = "help:guide";
+/// Routed to the frontend too: the check has UI (Settings shows the version
+/// and the download link), so it belongs where that state already lives.
+const CHECK_UPDATES: &str = "update:check";
 
 /// One pinned script: its id and the name to show in the menu.
 pub type Favorite = (String, String);
@@ -64,6 +67,10 @@ pub fn build<R: Runtime, M: Manager<R>>(app: &M, favorites: &[Favorite]) -> taur
     // No accelerator on purpose: the store is a browse-and-pick dialog, not a
     // frequent verb like the two imports above it.
     let store = MenuItem::with_id(app, "store:open", "Add from Store…", true, None::<&str>)?;
+    // No accelerator, same reasoning as the Help items: rare, and a typo in an
+    // accelerator string aborts `setup`.
+    let check_updates =
+        MenuItem::with_id(app, CHECK_UPDATES, "Check for Updates…", true, None::<&str>)?;
 
     // --- App / File -------------------------------------------------------
     //
@@ -86,6 +93,8 @@ pub fn build<R: Runtime, M: Manager<R>>(app: &M, favorites: &[Favorite]) -> taur
                         .build(),
                 ),
             )?,
+            &PredefinedMenuItem::separator(app)?,
+            &check_updates,
             &PredefinedMenuItem::separator(app)?,
             &settings,
             &show_logs,
@@ -114,6 +123,7 @@ pub fn build<R: Runtime, M: Manager<R>>(app: &M, favorites: &[Favorite]) -> taur
             &PredefinedMenuItem::separator(app)?,
             &settings,
             &show_logs,
+            &check_updates,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::close_window(app, None)?,
             &PredefinedMenuItem::quit(app, Some("Exit"))?,

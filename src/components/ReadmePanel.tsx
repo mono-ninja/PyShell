@@ -5,6 +5,7 @@ import { renderMarkdown } from "../lib/markdown";
 import { CloseIcon } from "./icons";
 import { useToast } from "./Toast";
 import { useEscape } from "../lib/keyboard";
+import { useI18n } from "../lib/i18n";
 
 interface ReadmePanelProps {
   doc: ScriptDoc;
@@ -18,8 +19,8 @@ interface ReadmePanelProps {
  * is shown as "Default" rather than guessed at — an author whose base file is
  * Ukrainian would be mislabelled by any assumption of English.
  */
-function langLabel(lang: string | null): string {
-  return lang === null ? "Default" : lang.toUpperCase();
+function langLabel(lang: string | null, t: (k: string) => string): string {
+  return lang === null ? t("Default") : lang.toUpperCase();
 }
 
 /**
@@ -30,6 +31,7 @@ function langLabel(lang: string | null): string {
  * focus moves in on open and the panel is labelled for screen readers.
  */
 export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
+  const { t } = useI18n();
   const panelRef = useRef<HTMLDivElement>(null);
   const body = useMemo(() => renderMarkdown(doc.content), [doc.content]);
   const { notifyError } = useToast();
@@ -48,7 +50,7 @@ export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
       ref={panelRef}
       tabIndex={-1}
       role="complementary"
-      aria-label={`${doc.name} documentation`}
+      aria-label={`${doc.name} — ${t("documentation")}`}
       class="flex w-[380px] shrink-0 flex-col border-l border-line bg-surface outline-none"
     >
       <div class="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
@@ -58,8 +60,8 @@ export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
         <button
           type="button"
           class="btn btn-ghost px-1.5"
-          title="Reveal in Finder"
-          aria-label="Reveal in Finder"
+          title={t("Reveal in Finder")}
+          aria-label={t("Reveal in Finder")}
           onClick={() => revealItemInDir(doc.path).catch((e) => notifyError(e, "Reveal failed"))}
         >
           Reveal
@@ -67,8 +69,8 @@ export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
         <button
           type="button"
           class="btn btn-ghost px-1.5"
-          title="Close (Esc)"
-          aria-label="Close documentation"
+          title={t("Close (Esc)")}
+          aria-label={t("Close documentation")}
           onClick={onClose}
         >
           <CloseIcon />
@@ -77,7 +79,7 @@ export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
       {doc.variants.length > 1 && (
         <div
           role="tablist"
-          aria-label="Documentation language"
+          aria-label={t("Documentation language")}
           class="flex shrink-0 gap-1 border-b border-line px-4 py-1.5"
         >
           {doc.variants.map((v) => {
@@ -92,7 +94,7 @@ export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
                 class={`pill ${active ? "bg-accent/15 text-accent" : "text-subtle hover:text-fg"}`}
                 onClick={() => onSelectLang(v.lang)}
               >
-                {langLabel(v.lang)}
+                {langLabel(v.lang, t)}
               </button>
             );
           })}
@@ -102,7 +104,7 @@ export function ReadmePanel({ doc, onClose, onSelectLang }: ReadmePanelProps) {
         {body.length > 0 ? (
           body
         ) : (
-          <p class="text-2xs text-subtle">This file is empty.</p>
+          <p class="text-2xs text-subtle">{t("This file is empty.")}</p>
         )}
       </div>
     </aside>

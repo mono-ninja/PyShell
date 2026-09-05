@@ -88,9 +88,15 @@ async fn prepare_env_inner(
                 },
             );
         }
+        // Typed payload — the frontend consumes this through the generated
+        // ts-rs binding (`EnvProgress`), not a hand-written interface.
         let _ = app.emit(
             &format!("env:{}:progress", script_id),
-            serde_json::json!({"phase": phase, "pct": pct, "message": message}),
+            crate::manifest::model::EnvProgress {
+                phase: phase.to_string(),
+                pct,
+                message: message.to_string(),
+            },
         );
     };
 

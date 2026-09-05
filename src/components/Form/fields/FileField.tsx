@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { CloseIcon, FileIcon, FolderIcon, SaveIcon } from "../../icons";
+import { useI18n } from "../../../lib/i18n";
 
 /** Show the file name, not the whole path — the full path lives in the tooltip. */
 function basename(path: string): string {
@@ -24,6 +25,7 @@ interface PickerProps {
  * `.form-input`, which would suggest the text is editable.
  */
 function Picker({ icon, value, placeholder, title, onPick, onDropText, onClear }: PickerProps) {
+  const { t } = useI18n();
   const [dragOver, setDragOver] = useState(false);
 
   return (
@@ -53,14 +55,14 @@ function Picker({ icon, value, placeholder, title, onPick, onDropText, onClear }
       >
         <span class="shrink-0 text-subtle">{icon}</span>
         <span class="flex-1 truncate">{value ?? placeholder}</span>
-        {!value && <span class="shrink-0 text-2xs text-subtle">Browse…</span>}
+        {!value && <span class="shrink-0 text-2xs text-subtle">{t("Browse…")}</span>}
       </button>
       {value && onClear && (
         <button
           type="button"
           class="btn btn-ghost px-1.5"
-          title="Clear"
-          aria-label="Clear selection"
+          title={t("Clear")}
+          aria-label={t("Clear selection")}
           onClick={onClear}
         >
           <CloseIcon size={12} />
@@ -77,12 +79,13 @@ interface FileFieldProps {
 }
 
 export function FileField({ value, extensions, onChange }: FileFieldProps) {
+  const { t } = useI18n();
   return (
     <Picker
       icon={<FileIcon />}
       value={value ? basename(value) : null}
       title={value ?? undefined}
-      placeholder="No file selected"
+      placeholder={t("No file selected")}
       onPick={async () => {
         const result = await open({
           multiple: false,
@@ -103,14 +106,15 @@ interface FilesFieldProps {
 }
 
 export function FilesField({ value, extensions, onChange }: FilesFieldProps) {
+  const { t } = useI18n();
   const arr = value ?? [];
 
   return (
     <div class="flex flex-col gap-1.5">
       <Picker
         icon={<FileIcon />}
-        value={arr.length > 0 ? `${arr.length} file${arr.length === 1 ? "" : "s"} selected` : null}
-        placeholder="No files selected"
+        value={arr.length > 0 ? t("{n} files selected", { n: arr.length }) : null}
+        placeholder={t("No files selected")}
         onPick={async () => {
           const result = await open({
             multiple: true,
@@ -133,8 +137,8 @@ export function FilesField({ value, extensions, onChange }: FilesFieldProps) {
               <button
                 type="button"
                 class="shrink-0 text-subtle hover:text-danger"
-                title="Remove"
-                aria-label={`Remove ${basename(p)}`}
+                title={t("Remove")}
+                aria-label={t("Remove {name}", { name: basename(p) })}
                 onClick={() => onChange(arr.filter((x) => x !== p))}
               >
                 <CloseIcon size={12} />
@@ -153,12 +157,13 @@ interface DirFieldProps {
 }
 
 export function DirField({ value, onChange }: DirFieldProps) {
+  const { t } = useI18n();
   return (
     <Picker
       icon={<FolderIcon />}
       value={value ? basename(value) : null}
       title={value ?? undefined}
-      placeholder="No folder selected"
+      placeholder={t("No folder selected")}
       onPick={async () => {
         const result = await open({ directory: true });
         if (result && typeof result === "string") onChange(result);
@@ -176,12 +181,13 @@ interface SavePathFieldProps {
 }
 
 export function SavePathField({ value, defaultName, onChange }: SavePathFieldProps) {
+  const { t } = useI18n();
   return (
     <Picker
       icon={<SaveIcon />}
       value={value ? basename(value) : null}
       title={value ?? undefined}
-      placeholder={defaultName ? `Save as ${defaultName}` : "Choose where to save"}
+      placeholder={defaultName ? t("Save as {name}", { name: defaultName }) : t("Choose where to save")}
       onPick={async () => {
         const result = await save({ defaultPath: defaultName });
         if (result && typeof result === "string") onChange(result);

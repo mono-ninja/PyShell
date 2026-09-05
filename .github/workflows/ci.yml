@@ -4,11 +4,22 @@ name: CI
 # main and every PR. release.yml builds only on tags and runs no checks, so
 # this is what stands between a broken main and a broken release.
 #
-# macOS only, deliberately: the Windows jobs (a `cargo check` compile job
-# here, and the release installer build) were removed after the v0.3.0 tag
-# build failed on the Windows runner — cause not diagnosed from the available
-# logs. Until that is understood, nothing compiles the `#[cfg(windows)]` code;
-# see the "Known gaps" section of CLAUDE.md before touching it.
+# macOS only, for now: the Windows `cargo check` job was removed after the
+# v0.3.0 tag build failed on the Windows runner, so nothing here compiles the
+# `#[cfg(windows)]` code in `runner/`.
+#
+# That failure is no longer a mystery — the test binary died at load with
+# 0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND because `rfd`'s `TaskDialogIndirect`
+# needs a ComCtl32 v6 manifest that `tauri_build` embeds only into the app
+# binary; `build.rs` now supplies one to test targets via
+# `cargo:rustc-link-arg-tests` (see AGENTS.md, Build). The fix is **unverified
+# on a real Windows runner**, which is why this job has not grown a Windows
+# entry yet.
+#
+# Order of restoration: run `release.yml` via workflow_dispatch (its Windows
+# matrix entry is already back, and a manual run builds without publishing) →
+# if "Generate bindings + run Rust tests" passes there, add a
+# `windows-compile` job here.
 #
 # Order matters (same as locally): `cargo test` must run before `tsc`,
 # because it generates the gitignored ts-rs bindings the TS build compiles

@@ -278,6 +278,21 @@ pub struct RepoScript {
     pub installed_version: Option<String>,
 }
 
+/// A published GitHub release of PyShell itself, as offered by the update
+/// check.
+///
+/// This is a **notice, not an installer**: the app ships no updater signing
+/// key, so `url` is the release page a user is sent to in their browser to
+/// download the .dmg by hand. See `repo::latest_release`.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct AppRelease {
+    /// Version without the tag's `v` prefix, e.g. `0.4.0`.
+    pub version: String,
+    /// The release page on github.com.
+    pub url: String,
+}
+
 /// What one Store install produced: the requested script plus any of its
 /// dependencies that were missing and got pulled in alongside. The dialog
 /// selects `entry` and mentions `extras` in its toast.
@@ -327,6 +342,74 @@ pub enum EnvStatus {
     Stale { reason: String },
     Building { pct: f32, phase: String },
     Failed { message: String },
+}
+
+/// Payload of the `env:{id}:progress` global event, emitted once per phase of
+/// an env build. Generated here (rather than hand-written on the frontend) so
+/// the IPC shape is pinned by the same ts-rs pipeline as everything else.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct EnvProgress {
+    pub phase: String,
+    #[ts(type = "number")]
+    pub pct: f32,
+    pub message: String,
+}
+
+/// A script's own source code, as shown by the "Show Code" viewer.
+///
+/// The path is resolved in Rust from the script list — the frontend never
+/// sends one — which is also what lets the viewer read scripts that live
+/// outside the fs plugin's scope (scripts are referenced in place, so they
+/// can sit anywhere on disk).
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct ScriptSource {
+    pub name: String,
+    pub path: PathBuf,
+    pub content: String,
+}
+
+/// One secret stored in the OS keychain, as listed by Settings ▸ Secrets.
+///
+/// The *value* is deliberately not part of this type — it never leaves the
+/// keychain. `set_at` is known only when PyShell itself recorded the write
+/// (entries that predate the registry list as `None`).
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct SecretEntry {
+    pub script_id: String,
+    pub key: String,
+    /// RFC 3339 timestamp of when the value was (last) written, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub set_at: Option<String>,
+}
+
+/// User-tunable application settings, persisted at `{app_support}/settings.json`.
+///
+/// `retention_runs` governs **both** the History entries and the run output
+/// folders on disk, so the two can never disagree about which runs still exist
+/// (the History tab offers Log/Files for exactly the runs whose folder is
+/// there).
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export, export_to = "../../src/types/bindings/")]
+pub struct AppSettings {
+    #[serde(default = "default_retention_runs")]
+    #[ts(type = "number")]
+    pub retention_runs: usize,
+}
+
+fn default_retention_runs() -> usize {
+    50
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            retention_runs: default_retention_runs(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

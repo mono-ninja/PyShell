@@ -1,4 +1,5 @@
 import type { JSX } from "preact";
+import { useI18n } from "../lib/i18n";
 
 export interface TabDef<Id extends string> {
   id: Id;
@@ -25,6 +26,7 @@ interface TabsProps<Id extends string> {
  * switcher unreachable without a mouse.
  */
 export function Tabs<Id extends string>({ tabs, active, onSelect, children }: TabsProps<Id>) {
+  const { t } = useI18n();
   const move = (delta: number) => {
     const i = tabs.findIndex((t) => t.id === active);
     if (i < 0) return;
@@ -36,7 +38,7 @@ export function Tabs<Id extends string>({ tabs, active, onSelect, children }: Ta
     <div class="flex shrink-0 items-center gap-1 border-b border-line px-3">
       <div
         role="tablist"
-        aria-label="Run panes"
+        aria-label={t("Run panes")}
         class="flex items-center gap-0.5"
         onKeyDown={(e) => {
           if (e.key === "ArrowRight") {
@@ -85,7 +87,7 @@ export function Tabs<Id extends string>({ tabs, active, onSelect, children }: Ta
               {tab.dot && !selected && (
                 <span
                   class="absolute right-1 top-1.5 h-1.5 w-1.5 rounded-full bg-accent"
-                  aria-label="new content"
+                  aria-label={t("new content")}
                 />
               )}
             </button>

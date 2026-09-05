@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::error::{AppError, Result};
-use crate::manifest::model::{RepoInstallResult, RepoScript, ScriptEntry};
+use crate::manifest::model::{AppRelease, RepoInstallResult, RepoScript, ScriptEntry};
 use crate::repo;
 use crate::AppState;
 
@@ -45,6 +45,38 @@ fn enrich(mut entries: Vec<RepoScript>, state: &AppState) -> Vec<RepoScript> {
         }
     }
     entries
+}
+
+/// Is a newer PyShell available? `Some(release)` is one to offer, `None` means
+/// the running build is current (or nothing is published yet).
+///
+/// This is a **notice, not an updater**: the frontend shows the version and
+/// links to the release page, where the user downloads the .dmg themselves.
+/// Auto-install would need a Tauri updater signing key and a `latest.json`
+/// asset, which the release pipeline does not produce.
+///
+/// Cached in `AppState` for [`repo::UPDATE_TTL`] so the background check at
+/// startup and the Settings pane share one API request; `force` (the menu's
+/// "Check for Updates…") always asks GitHub.
+#[tauri::command]
+pub async fn check_app_update(
+    force: bool,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<AppRelease>> {
+    if !force {
+        // Scoped so the guard is gone before the await below.
+        let cached = state.app_update.lock().unwrap();
+        if let Some(check) = cached.as_ref().filter(|c| c.is_fresh()) {
+            return Ok(check.release.clone());
+        }
+    }
+    // `package_info().version` is the version Tauri actually built this app
+    // as — `tauri.conf.json` when it sets one, `Cargo.toml` otherwise — so the
+    // comparison, the bundle and the number Settings shows can never disagree.
+    let release = repo::app_update(&app.package_info().version.to_string()).await?;
+    *state.app_update.lock().unwrap() = Some(repo::UpdateCheck::new(release.clone()));
+    Ok(release)
 }
 
 /// Download one script folder from the community repo into
