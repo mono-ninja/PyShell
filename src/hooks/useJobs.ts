@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo } from "preact/hooks";
 import { Channel } from "@tauri-apps/api/core";
 import { ipc } from "../lib/ipc";
 import { useToast } from "../components/Toast";
+import { normalizeTableRows } from "../lib/table-rows";
 import type { JobEvent, LogLine } from "../types/schema";
 
 export interface ChartSeries {
@@ -102,13 +103,17 @@ export function useJobs() {
               },
             }));
           } else if (type === "table") {
+            const columns = Array.isArray(ev.columns) ? (ev.columns as string[]) : [];
             updateJob(scriptId, (prev) => ({
               ...prev,
               structured: {
                 ...prev.structured,
                 table: {
-                  columns: (ev.columns as string[]) ?? [],
-                  rows: (ev.rows as unknown[][]) ?? [],
+                  columns,
+                  // legacy scripts may emit {column: cell} rows —
+                  // normalized here so the Results pane renders
+                  // instead of crashing on row.map
+                  rows: normalizeTableRows(columns, ev.rows as unknown[] | undefined),
                 },
               },
             }));

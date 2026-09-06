@@ -316,6 +316,9 @@ emit({
   not rely on that alone.
 - \`pct\` is **0–100, not 0–1**. Sending \`0.42\` pins the bar near zero.
 - Each kind **replaces** its previous value rather than appending.
+- A table's \`rows\` are **arrays of cells** aligned with \`columns\` —
+  \`[["a.com", "OK"]]\`, not \`[{"Host": "a.com"}]\`. Object rows are read by
+  column name as a legacy courtesy; the contract is arrays.
 - An unknown \`type\` is ignored silently — if nothing appears, check the spelling.
 - Throttle them: events are sent individually without batching, and they count
   toward the same output cap as log lines (50 MB / 500k lines per run).

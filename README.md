@@ -509,7 +509,7 @@ A release is built from a tag:
 
 ```bash
 # bump the version in package.json, src-tauri/Cargo.toml and tauri.conf.json together
-git tag v0.4.0 && git push origin v0.4.0
+git tag v0.4.1 && git push origin v0.4.1
 ```
 
 The workflow builds a universal `.dmg` for macOS (arm64 + x86_64 in one file),
