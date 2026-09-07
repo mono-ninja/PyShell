@@ -4,7 +4,20 @@ import { listen } from "@tauri-apps/api/event";
 import { ipc } from "../lib/ipc";
 import type { RepoInstallResult, RepoScript, ScriptEntry } from "../types/schema";
 import { ScriptIcon } from "../lib/script-icon";
-import { filterCatalog, formatBytes, groupCatalog, hasUpdate, installStateOf } from "../lib/store-utils";
+import {
+  ALL_CATEGORIES,
+  catalogCategories,
+  filterByCategory,
+  filterByState,
+  filterCatalog,
+  formatBytes,
+  groupCatalog,
+  hasUpdate,
+  installStateOf,
+  storeCounts,
+  STORE_FILTERS,
+} from "../lib/store-utils";
+import type { StoreFilter } from "../lib/store-utils";
 import { useToast } from "./Toast";
 import { Modal } from "./Modal";
 import { useI18n } from "../lib/i18n";
@@ -92,6 +105,8 @@ export function StoreDialog({ scripts, runningScripts, onInstalled, onRemoved, o
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<StoreFilter>("all");
+  const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [dest, setDest] = useState<string>(loadDest);
   const [installing, setInstalling] = useState<InstallState | null>(null);
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
@@ -253,8 +268,50 @@ export function StoreDialog({ scripts, runningScripts, onInstalled, onRemoved, o
     for (const e of entries ?? []) m.set(e.id, e.name);
     return m;
   }, [entries]);
-  const visible = filterCatalog(entries ?? [], query);
+  const categories = useMemo(() => catalogCategories(entries ?? []), [entries]);
+  // A Refresh can drop the category the user had picked (its last script left
+  // the repo). Deriving the effective key instead of storing it means the
+  // selection heals itself rather than pointing the list at an empty section.
+  const categoryKey = categories.some((c) => c.key === category) ? category : ALL_CATEGORIES;
+  const inCategory = useMemo(
+    () => filterByCategory(entries ?? [], categoryKey),
+    [entries, categoryKey],
+  );
+
+  // The pill badges count within the chosen category, but ignore the search:
+  // the category is the scope the user set and expects the counts to follow,
+  // while a badge moving with every keystroke would only repeat how many rows
+  // the search found — which the list itself already shows.
+  const counts = useMemo(() => storeCounts(inCategory, scripts), [inCategory, scripts]);
+  const visible = filterCatalog(filterByState(inCategory, scripts, filter), query);
   const sections = useMemo(() => groupCatalog(visible), [visible]);
+
+  const filterLabels: Record<StoreFilter, string> = {
+    all: t("All"),
+    installed: t("Installed"),
+    updates: t("Updates"),
+  };
+  const filterTitles: Record<StoreFilter, string> = {
+    all: t("All scripts, installed or not"),
+    installed: t("Scripts you have already imported"),
+    updates: t("Installed scripts the repo carries a newer version of"),
+  };
+
+  // Why the list is empty, in the words of whatever emptied it: an empty repo,
+  // a search that found nothing, or a filter with nothing in it. "Nothing
+  // matches" under an empty search box would be a riddle.
+  const scoped = categoryKey !== ALL_CATEGORIES;
+  const emptyMessage = (entries?.length ?? 0) === 0
+    ? t("No scripts found in the repo.")
+    : query.trim()
+      ? t("Nothing matches \"{q}\".", { q: query })
+      : filter === "installed"
+        ? scoped
+          ? t("Nothing from this category is installed yet.")
+          : t("No store scripts are installed yet.")
+        : scoped
+          ? t("Everything you installed from this category is up to date.")
+          : t("Everything you installed from the store is up to date.");
 
   const confirmTitle = confirm
     ? confirm.kind === "update"
@@ -315,7 +372,7 @@ export function StoreDialog({ scripts, runningScripts, onInstalled, onRemoved, o
         </button>
       </div>
 
-      <div class="border-b border-line px-5 py-2.5">
+      <div class="space-y-2 border-b border-line px-5 py-2.5">
         <div class="relative">
           <SearchIcon
             size={13}
@@ -337,6 +394,67 @@ export function StoreDialog({ scripts, runningScripts, onInstalled, onRemoved, o
             >
               <CloseIcon size={12} />
             </button>
+          )}
+        </div>
+
+        {/* Install state on the left, category scope on the right — two axes
+            that combine, both narrowing the one list below. Toggle buttons
+            rather than a `tablist`: they filter a list instead of swapping
+            panels, and each stays reachable by Tab without arrow-key handling. */}
+        <div class="flex items-center gap-1">
+          <div class="flex items-center gap-1" role="group" aria-label={t("Filter by install state")}>
+            {STORE_FILTERS.map((f) => {
+              const active = filter === f;
+              // An idle Updates pill with something in it carries the accent,
+              // the same colour as the dot on "+ Store" that sent the user here.
+              const pending = f === "updates" && counts.updates > 0 && !active;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  aria-pressed={active}
+                  title={filterTitles[f]}
+                  class={`pill ${
+                    active
+                      ? "bg-accent/15 text-accent"
+                      : pending
+                        ? "text-accent hover:bg-accent/10"
+                        : "text-subtle hover:text-fg"
+                  }`}
+                  onClick={() => setFilter(f)}
+                >
+                  {filterLabels[f]}
+                  {entries !== null && (
+                    <span class={`tabular-nums ${active || pending ? "" : "text-subtle/70"}`}>
+                      {counts[f]}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Category scope. A `select` rather than a second row of pills: six
+              categories fit either way, but the list comes from the repo and
+              grows without an app release — a dozen pills would wrap, while
+              this stays one line. Counts sit in the labels, the way the log
+              view's stream filter carries them. */}
+          {categories.length > 1 && (
+            <select
+              class="form-input ml-auto w-auto py-0.5 pl-2 pr-7 text-2xs"
+              value={categoryKey}
+              aria-label={t("Filter by category")}
+              onChange={(e) => setCategory(e.currentTarget.value)}
+            >
+              <option value={ALL_CATEGORIES}>
+                {t("All categories")} ({entries?.length ?? 0})
+              </option>
+              {categories.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label} ({c.count})
+                </option>
+              ))}
+            </select>
           )}
         </div>
       </div>
@@ -363,9 +481,7 @@ export function StoreDialog({ scripts, runningScripts, onInstalled, onRemoved, o
 
         {!error && entries !== null && visible.length === 0 && (
           <p class="px-1 py-6 text-center text-2xs text-subtle">
-            {entries.length === 0
-              ? t("No scripts found in the repo.")
-              : t("Nothing matches \"{q}\".", { q: query })}
+            {emptyMessage}
           </p>
         )}
 

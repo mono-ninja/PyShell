@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_CATEGORIES,
+  catalogCategories,
   countUpdates,
+  filterByCategory,
+  filterByState,
   filterCatalog,
   formatBytes,
   groupCatalog,
   hasUpdate,
   installStateOf,
   installedIds,
+  isUpdatable,
+  storeCounts,
 } from "./store-utils";
 import type { RepoScript, ScriptEntry } from "../types/schema";
 
@@ -175,5 +181,113 @@ describe("formatBytes", () => {
     expect(formatBytes(900)).toBe("900 B");
     expect(formatBytes(1024)).toBe("1 KB");
     expect(formatBytes(1280)).toBe("1 KB");
+  });
+});
+
+describe("filterByState", () => {
+  const entries = [
+    entry({ dir: "a", id: "a", version: "2", installed_version: "1" }), // update
+    entry({ dir: "b", id: "b", version: "1", installed_version: "1" }), // current
+    entry({ dir: "c", id: "c" }), // not installed
+    entry({ dir: "d", id: "d", version: "2", installed_version: "1" }), // gone
+  ];
+  const scripts = [script("a"), script("b"), script("d", false)];
+
+  it("passes everything through for \"all\"", () => {
+    expect(filterByState(entries, scripts, "all")).toHaveLength(4);
+  });
+
+  it("keeps every imported script, unreachable ones included", () => {
+    expect(filterByState(entries, scripts, "installed").map((e) => e.dir)).toEqual(["a", "b", "d"]);
+  });
+
+  it("keeps only rows the Update button would offer", () => {
+    // "d" has a newer version but its folder is gone — the row shows Missing
+    // folder instead of Update, so the filter must not promise one either.
+    expect(filterByState(entries, scripts, "updates").map((e) => e.dir)).toEqual(["a"]);
+  });
+
+  it("agrees with isUpdatable and countUpdates", () => {
+    expect(filterByState(entries, scripts, "updates").every((e) => isUpdatable(e, scripts))).toBe(true);
+    expect(filterByState(entries, scripts, "updates")).toHaveLength(countUpdates(entries, scripts));
+  });
+
+  it("is empty when nothing is installed", () => {
+    expect(filterByState(entries, [], "installed")).toEqual([]);
+    expect(filterByState(entries, [], "updates")).toEqual([]);
+  });
+});
+
+describe("storeCounts", () => {
+  it("counts each filter the way the filter itself does", () => {
+    const entries = [
+      entry({ dir: "a", id: "a", version: "2", installed_version: "1" }),
+      entry({ dir: "b", id: "b", version: "1", installed_version: "1" }),
+      entry({ dir: "c", id: "c" }),
+      entry({ dir: "d", id: "d", version: "2", installed_version: "1" }),
+    ];
+    const scripts = [script("a"), script("b"), script("d", false)];
+    expect(storeCounts(entries, scripts)).toEqual({ all: 4, installed: 3, updates: 1 });
+    for (const f of ["all", "installed", "updates"] as const) {
+      expect(filterByState(entries, scripts, f)).toHaveLength(storeCounts(entries, scripts)[f]);
+    }
+  });
+
+  it("is all zeroes for an empty catalog", () => {
+    expect(storeCounts([], [script("a")])).toEqual({ all: 0, installed: 0, updates: 0 });
+  });
+});
+
+describe("catalogCategories", () => {
+  const entries = [
+    entry({ dir: "a", category: "SEO" }),
+    entry({ dir: "b", category: "Recon" }),
+    entry({ dir: "c", category: null }),
+    entry({ dir: "d", category: "SEO" }),
+  ];
+
+  it("lists the categories in the order the list renders them, with counts", () => {
+    expect(catalogCategories(entries)).toEqual([
+      { key: "Recon", label: "Recon", count: 1 },
+      { key: "SEO", label: "SEO", count: 2 },
+      { key: "\u0000other", label: "Other", count: 1 },
+    ]);
+  });
+
+  it("agrees with the sections the list groups into", () => {
+    const sections = groupCatalog(entries);
+    expect(catalogCategories(entries).map((c) => c.key)).toEqual(sections.map((s) => s.key));
+    expect(catalogCategories(entries).map((c) => c.count)).toEqual(
+      sections.map((s) => s.items.length),
+    );
+  });
+
+  it("is empty for an empty catalog", () => {
+    expect(catalogCategories([])).toEqual([]);
+  });
+});
+
+describe("filterByCategory", () => {
+  const entries = [
+    entry({ dir: "a", category: "SEO" }),
+    entry({ dir: "b", category: "Recon" }),
+    entry({ dir: "c", category: null }),
+    entry({ dir: "d", category: "Other" }),
+  ];
+
+  it("passes everything through for the all-categories key", () => {
+    expect(filterByCategory(entries, ALL_CATEGORIES)).toHaveLength(4);
+  });
+
+  it("keeps only the chosen category", () => {
+    expect(filterByCategory(entries, "SEO").map((e) => e.dir)).toEqual(["a"]);
+  });
+
+  it("merges uncategorised scripts into a declared \"Other\", like the sections do", () => {
+    expect(filterByCategory(entries, "Other").map((e) => e.dir)).toEqual(["d", "c"]);
+  });
+
+  it("yields nothing for a category that left the catalog", () => {
+    expect(filterByCategory(entries, "Gone")).toEqual([]);
   });
 });

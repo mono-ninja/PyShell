@@ -387,6 +387,20 @@ const ua: Dictionary = {
   "Loading the catalog from GitHub…": "Завантаження каталогу з GitHub…",
   "No scripts found in the repo.": "У репозиторії немає скриптів.",
   "Nothing matches \"{q}\".": "Нічого не знайдено за запитом «{q}».",
+  "Updates": "Оновлення",
+  "Filter by install state": "Фільтр за станом встановлення",
+  "Filter by category": "Фільтр за категорією",
+  "All categories": "Усі категорії",
+  "Nothing from this category is installed yet.": "З цієї категорії ще нічого не встановлено.",
+  "Everything you installed from this category is up to date.":
+    "Усе встановлене з цієї категорії має актуальну версію.",
+  "All scripts, installed or not": "Усі скрипти — встановлені й ні",
+  "Scripts you have already imported": "Скрипти, які ви вже імпортували",
+  "Installed scripts the repo carries a newer version of":
+    "Встановлені скрипти, для яких у репозиторії є новіша версія",
+  "No store scripts are installed yet.": "Ще не встановлено жодного скрипта зі Store.",
+  "Everything you installed from the store is up to date.":
+    "Усе встановлене зі Store має актуальну версію.",
   "Refresh catalog": "Оновити каталог",
   "Re-fetch the catalog from GitHub (spends one API request)": "Повторно завантажити каталог з GitHub (витрачає один API-запит)",
   "needs": "потребує",
