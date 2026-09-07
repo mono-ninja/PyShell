@@ -138,12 +138,12 @@ export function StoreDialog({ scripts, runningScripts, onInstalled, onRemoved, o
    *
    * `installed_version` is enriched **per call** on the Rust side, so rows
    * fetched before the change carry a stale one — and the row the user just
-   * acted on is exactly the row that goes wrong. A fresh install kept
-   * `installed_version` absent, which `hasUpdate` reads as "the repo has a
-   * version the install does not" and offered an Update for the very files it
-   * had just downloaded; an updated row kept its old version and its Update
-   * button, where a second click would swap the folder again and leave another
-   * `.backup-*` behind.
+   * acted on is exactly the row that goes wrong. An updated row keeps its old
+   * version and its Update button, where a second click would swap the folder
+   * again and leave another `.backup-*` behind; a freshly installed one keeps
+   * `installed_version` absent and would report the wrong installed version in
+   * the row (it no longer offers a phantom Update — `hasUpdate` compares
+   * versions, and an absent one is not "older").
    *
    * Costs no network: the Rust catalog cache is still fresh (`CATALOG_TTL`),
    * so this only re-runs the enrichment. Failure is swallowed — the action

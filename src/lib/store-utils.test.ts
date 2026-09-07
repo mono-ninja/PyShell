@@ -11,6 +11,7 @@ import {
   hasUpdate,
   installStateOf,
   installedIds,
+  isNewerVersion,
   isUpdatable,
   storeCounts,
 } from "./store-utils";
@@ -83,33 +84,65 @@ describe("installedIds", () => {
   });
 });
 
+describe("isNewerVersion", () => {
+  it("compares component by component, missing components counting as zero", () => {
+    expect(isNewerVersion("0.3.9", "0.4")).toBe(true);
+    expect(isNewerVersion("0.4", "0.4.0")).toBe(false);
+    expect(isNewerVersion("1.2.3", "1.10.0")).toBe(true);
+    expect(isNewerVersion("2.0", "1.9.9")).toBe(false);
+  });
+
+  it("ignores a leading v and any suffix", () => {
+    expect(isNewerVersion("v1.0", "v1.1")).toBe(true);
+    expect(isNewerVersion("1.0", "1.1-beta")).toBe(true);
+    expect(isNewerVersion("1.0+build7", "1.0")).toBe(false);
+  });
+
+  it("treats an unparseable version on either side as not newer", () => {
+    expect(isNewerVersion("1.0", "next")).toBe(false);
+    expect(isNewerVersion("latest", "2.0")).toBe(false);
+    expect(isNewerVersion("", "1.0")).toBe(false);
+  });
+});
+
 describe("hasUpdate", () => {
-  it("is false when the versions match, including both missing", () => {
+  it("is true only when the repo version is strictly newer", () => {
+    expect(hasUpdate(entry({ version: "2", installed_version: "1" }))).toBe(true);
+    expect(hasUpdate(entry({ version: "0.2.0", installed_version: "0.1.9" }))).toBe(true);
+  });
+
+  it("is false when the versions match, written differently or not at all", () => {
     expect(hasUpdate(entry({ version: "1", installed_version: "1" }))).toBe(false);
+    expect(hasUpdate(entry({ version: "0.4.0", installed_version: "v0.4" }))).toBe(false);
     expect(hasUpdate(entry({ version: null, installed_version: null }))).toBe(false);
   });
 
-  it("is true when the repo version differs from the installed one", () => {
-    expect(hasUpdate(entry({ version: "2", installed_version: "1" }))).toBe(true);
-    // Repo gained a version where the installed copy had none.
-    expect(hasUpdate(entry({ version: "2", installed_version: null }))).toBe(true);
-    // Repo dropped a version the installed copy still has.
-    expect(hasUpdate(entry({ version: null, installed_version: "1" }))).toBe(true);
+  it("never offers a downgrade", () => {
+    // The author republished an older version, or the repo folder was rolled
+    // back. Repair re-downloads it on purpose; Update must not suggest it.
+    expect(hasUpdate(entry({ version: "1", installed_version: "2" }))).toBe(false);
   });
 
-  it("reads an *absent* installed_version as an update — the shape a stale row has", () => {
+  it("is false when either side has no version — different is not newer", () => {
+    // Repo gained a version where the installed copy had none, and the other
+    // way round. Neither is a version comparison, so neither is an update; the
+    // row stays Installed and Repair covers re-downloading it.
+    expect(hasUpdate(entry({ version: "2", installed_version: null }))).toBe(false);
+    expect(hasUpdate(entry({ version: null, installed_version: "1" }))).toBe(false);
+  });
+
+  it("does not offer an update for an *absent* installed_version", () => {
     // `skip_serializing_if` makes the field absent over IPC, not null, so a row
-    // fetched while the script was still uninstalled carries `undefined`. This
-    // is correct here and is exactly why StoreDialog re-reads the catalog after
-    // an install: left stale, the row would offer an Update for the files it
-    // had just downloaded. Fix the staleness, never this comparison.
+    // fetched while the script was still uninstalled carries `undefined`. That
+    // used to read as an update and made a freshly installed row offer one for
+    // the files it had just downloaded; a version comparison cannot.
     const stale: RepoScript = { ...entry({ version: "1" }), installed_version: undefined };
-    expect(hasUpdate(stale)).toBe(true);
+    expect(hasUpdate(stale)).toBe(false);
   });
 });
 
 describe("countUpdates", () => {
-  it("counts only installed scripts whose repo version differs", () => {
+  it("counts only installed scripts with a strictly newer repo version", () => {
     const entries = [
       entry({ id: "a", version: "2", installed_version: "1" }), // update
       entry({ id: "b", version: "1", installed_version: "1" }), // current

@@ -28,15 +28,57 @@ export function installedIds(scripts: ScriptEntry[]): Set<string> {
 }
 
 /**
- * The repo carries a different version than the installed script. Either side
- * may declare no version at all — then any difference still counts, since a
- * repo that gained (or dropped) a version changed something.
+ * Version → numeric components, or `null` when the string is not a version.
+ *
+ * Mirrors `version_parts` in `repo.rs`, which the app's own update notice
+ * uses: a leading `v` is optional and any suffix (`-beta`, `+build`) is cut
+ * before parsing, so `v1.2-rc1` compares as `1.2`.
+ */
+function versionParts(v: string): number[] | null {
+  const core = v.trim().replace(/^v/i, "").split(/[-+]/)[0];
+  if (!core) return null;
+  const parts = core.split(".").map((p) => (/^\d+$/.test(p) ? Number(p) : NaN));
+  return parts.some(Number.isNaN) ? null : parts;
+}
+
+/**
+ * True when `latest` is strictly newer than `current`.
+ *
+ * Missing components count as zero, so `0.4` equals `0.4.0` and beats `0.3.9`.
+ * Anything unparseable on either side compares as *not* newer — the same rule
+ * `repo.rs` applies to release tags, for the same reason: a hand-written
+ * version must not nag forever.
+ */
+export function isNewerVersion(current: string, latest: string): boolean {
+  const cur = versionParts(current);
+  const next = versionParts(latest);
+  if (!cur || !next) return false;
+  for (let i = 0; i < Math.max(cur.length, next.length); i += 1) {
+    const a = cur[i] ?? 0;
+    const b = next[i] ?? 0;
+    if (a !== b) return b > a;
+  }
+  return false;
+}
+
+/**
+ * The repo carries a **newer version** than the installed script.
+ *
+ * The version in the manifest is the only thing that decides this: not the
+ * folder's contents, not its timestamps. An author who edits files without
+ * bumping `version` is not shipping an update, and PyShell must not offer one
+ * — Repair exists for re-downloading a folder that went bad.
+ *
+ * A version that is missing or unparseable on either side means no update:
+ * "different" is not "newer", and a downgrade or a dropped `version:` field
+ * would otherwise offer an Update that the next catalog read offers again.
  *
  * Only meaningful for entries whose id is in `installedIds` — the dialog calls
  * this after that check.
  */
 export function hasUpdate(e: RepoScript): boolean {
-  return e.version !== e.installed_version;
+  if (!e.version || !e.installed_version) return false;
+  return isNewerVersion(e.installed_version, e.version);
 }
 
 /**
